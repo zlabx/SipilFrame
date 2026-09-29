@@ -1,0 +1,600 @@
+<template>
+  <v-dialog v-model="open" max-width="860">
+    <v-card class="changelog-card">
+      <header class="changelog-header">
+        <div>
+          <div class="text-h5 font-weight-medium mb-1">{{ $t('dialogs.changelog.title') }}</div>
+          <p class="text-body-2 text-medium-emphasis mb-1">
+            {{ $t('dialogs.changelog.description') }}
+          </p>
+          <!-- <div v-if="resolvedLocale" class="text-caption text-medium-emphasis">
+            Showing {{ resolvedLocale.toUpperCase() }} changelog
+          </div> -->
+        </div>
+        <v-btn icon="mdi-close" variant="text" size="small" class="ml-2" @click="closeAndTrack" />
+      </header>
+
+      <v-divider class="my-4" />
+
+      <div class="changelog-scroll">
+        <div v-if="loading" class="changelog-state">
+          <v-progress-circular indeterminate color="primary" size="28" class="mr-2" />
+          <span>Loading changelog…</span>
+        </div>
+
+        <v-alert v-else-if="error" type="warning" variant="tonal" border="start" class="mb-4">
+          {{ error }}
+        </v-alert>
+
+        <template v-else>
+          <section v-for="release in releases" :key="release.version" class="changelog-entry">
+            <div class="entry-top">
+              <div>
+                <div class="entry-title">{{ release.title }}</div>
+                <div class="entry-subtitle">
+                  <v-chip size="x-small" color="primary" label variant="tonal" class="mr-2">{{
+                    release.version
+                  }}</v-chip>
+                  <span>{{ release.date }}</span>
+                </div>
+              </div>
+              <v-chip v-if="release.tag" size="small" color="primary" variant="flat">{{ release.tag }}</v-chip>
+            </div>
+
+            <div class="entry-body">
+              <ul class="changelog-items">
+                <li v-for="(item, index) in release.highlights" :key="`${release.version}-${index}`">{{ item }}</li>
+              </ul>
+
+              <i18n-t
+                v-if="release.contributors?.length"
+                keypath="dialogs.changelog.contributors"
+                tag="p"
+                scope="global"
+                class="changelog-contributors text-body-2 text-medium-emphasis"
+              >
+                <template #names>
+                  <template v-for="(part, index) in contributorParts(release.contributors)" :key="index">
+                    <component
+                      :is="part.person.url ? 'a' : 'span'"
+                      v-if="part.person"
+                      class="changelog-contributor"
+                      :href="part.person.url"
+                      :target="part.person.url ? '_blank' : undefined"
+                      :rel="part.person.url ? 'noopener noreferrer' : undefined"
+                      :title="contributorTitle(part.person)"
+                    >
+                      <img
+                        v-if="part.person.url"
+                        class="changelog-avatar"
+                        :src="`${part.person.url}.png?size=48`"
+                        :alt="''"
+                        loading="lazy"
+                        @error="hideAvatar"
+                      />
+                      <span>{{ part.person.name }}</span>
+                    </component>
+                    <template v-else>{{ part.literal }}</template>
+                  </template>
+                </template>
+              </i18n-t>
+
+              <div v-if="release.media?.length" class="changelog-media-grid">
+                <figure
+                  v-for="media in release.media"
+                  :key="media.src"
+                  class="changelog-media-item"
+                  :class="{ 'changelog-media-item--large': media.size === 'large' }"
+                >
+                  <video
+                    v-if="isVideoMedia(media)"
+                    :src="media.src"
+                    :aria-label="media.alt || release.title"
+                    class="changelog-media-video"
+                    controls
+                    loop
+                    muted
+                    playsinline
+                  ></video>
+                  <button
+                    v-else
+                    type="button"
+                    class="changelog-media-button"
+                    :aria-label="media.caption || media.alt || release.title"
+                    @click="openLightbox(media, release)"
+                  >
+                    <v-img :src="media.src" :alt="media.alt || release.title" class="changelog-media-img"></v-img>
+                    <span class="changelog-media-zoom" aria-hidden="true">
+                      <v-icon size="16" icon="mdi-magnify-plus-outline" />
+                    </span>
+                  </button>
+                  <figcaption v-if="media.caption" class="text-caption text-medium-emphasis text-center mt-1">
+                    {{ media.caption }}
+                  </figcaption>
+                </figure>
+              </div>
+            </div>
+          </section>
+
+          <div v-if="!releases.length" class="changelog-state text-medium-emphasis">
+            Nothing to show yet. Please add entries to <code>public/changelog/{{ resolvedLocale }}.json</code>.
+          </div>
+
+          <section v-if="upcoming.length" class="changelog-upcoming">
+            <div class="text-overline text-medium-emphasis">Coming soon</div>
+            <div v-for="feature in upcoming" :key="feature.title" class="upcoming-card">
+              <div class="font-weight-medium">{{ feature.title }}</div>
+              <div class="text-body-2 text-medium-emphasis">{{ feature.detail }}</div>
+            </div>
+          </section>
+        </template>
+      </div>
+
+      <v-dialog v-model="lightboxOpen" max-width="1600" @after-leave="lightboxMedia = null">
+        <div class="changelog-lightbox" @click="lightboxOpen = false">
+          <v-img
+            v-if="lightboxMedia"
+            :src="lightboxMedia.src"
+            :alt="lightboxMedia.alt || lightboxCaption"
+            class="changelog-lightbox-img"
+          ></v-img>
+          <div v-if="lightboxCaption" class="changelog-lightbox-caption">{{ lightboxCaption }}</div>
+        </div>
+      </v-dialog>
+    </v-card>
+  </v-dialog>
+</template>
+
+<script setup lang="ts">
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import { closeModal } from 'jenesius-vue-modal';
+import { useI18n } from 'vue-i18n';
+import { useAppStore } from '@/store/app';
+
+const open = ref(true);
+type MediaEntry = {
+  src: string;
+  alt?: string;
+  caption?: string;
+  /** 'large' spans the full row instead of a thumbnail cell */
+  size?: 'large';
+  type?: 'image' | 'video';
+};
+
+type ContributorEntry = {
+  name: string;
+  /** A GitHub profile, which also supplies the avatar. Absent when no handle is known. */
+  url?: string;
+  commits?: number;
+};
+
+type ReleaseEntry = {
+  version: string;
+  title: string;
+  date: string;
+  highlights: string[];
+  tag?: string;
+  media?: MediaEntry[];
+  /**
+   * Written by scripts/contributors.mjs. Names and links do not translate, so they are read from
+   * the base file whatever the language, and a locale never has to repeat them.
+   */
+  contributors?: ContributorEntry[];
+};
+
+type UpcomingEntry = {
+  title: string;
+  detail: string;
+};
+
+type ChangelogData = {
+  releases?: ReleaseEntry[];
+  upcoming?: UpcomingEntry[];
+};
+
+const lightboxOpen = ref(false);
+const lightboxMedia = ref<MediaEntry | null>(null);
+const lightboxCaption = computed(() => lightboxMedia.value?.caption || lightboxMedia.value?.alt || '');
+
+/** Opens the full size view; falls back to the release title so the overlay is never unlabelled. */
+const openLightbox = (media: MediaEntry, release: ReleaseEntry) => {
+  lightboxMedia.value = { ...media, caption: media.caption || media.alt || release.title };
+  lightboxOpen.value = true;
+};
+
+const releases = ref<ReleaseEntry[]>([]);
+const upcoming = ref<UpcomingEntry[]>([]);
+const loading = ref(false);
+const error = ref('');
+const resolvedLocale = ref('');
+
+const { locale } = useI18n();
+const appStore = useAppStore();
+const currentAppVersion = APP_VERSION;
+
+let latestRequest: symbol | null = null;
+const baseLocale = 'en';
+
+const isVideoMedia = (entry: MediaEntry) => {
+  if (entry.type) return entry.type === 'video';
+  return /\.mp4($|\?)/i.test(entry.src);
+};
+
+const cloneMedia = (entry: MediaEntry): MediaEntry => ({
+  src: entry.src,
+  alt: entry.alt,
+  caption: entry.caption,
+  type: entry.type,
+  size: entry.size,
+});
+
+type ContributorPart = { person: ContributorEntry; literal?: undefined } | { person?: undefined; literal: string };
+
+/**
+ * A list of people, joined the way the reader's language joins lists.
+ *
+ * Intl.ListFormat knows that English wants 'a, b and c' and Czech 'a, b a c', so no locale has to
+ * translate a separator - the message only has to say where the list goes. formatToParts keeps the
+ * people as elements, so each one can still be a link instead of being flattened into a string.
+ */
+const contributorParts = (people: ContributorEntry[]): ContributorPart[] => {
+  const names = people.map((person) => person.name);
+  let next = 0;
+
+  try {
+    const formatter = new Intl.ListFormat(locale.value, { style: 'long', type: 'conjunction' });
+    return formatter
+      .formatToParts(names)
+      .map((part) => (part.type === 'element' ? { person: people[next++] } : { literal: part.value }));
+  } catch {
+    // An unknown locale tag is not worth losing the credit over.
+    return people.flatMap((person, index) => (index ? [{ literal: ', ' }, { person }] : [{ person }]));
+  }
+};
+
+const contributorTitle = (person: ContributorEntry) =>
+  person.commits ? `${person.name} - ${person.commits} commits` : person.name;
+
+/** An avatar is a nicety; offline, or with GitHub blocked, the name alone carries the credit. */
+const hideAvatar = (event: Event) => {
+  (event.target as HTMLElement).style.display = 'none';
+};
+
+const cloneRelease = (entry: ReleaseEntry): ReleaseEntry => ({
+  version: entry.version,
+  title: entry.title,
+  date: entry.date,
+  highlights: [...entry.highlights],
+  tag: entry.tag,
+  media: entry.media ? entry.media.map(cloneMedia) : undefined,
+  contributors: entry.contributors ? entry.contributors.map((person) => ({ ...person })) : undefined,
+});
+
+const cloneUpcoming = (entry: UpcomingEntry): UpcomingEntry => ({
+  title: entry.title,
+  detail: entry.detail,
+});
+
+const getLocaleFallbacks = (value: string) => {
+  const trimmed = value.toLowerCase();
+  const [base] = trimmed.split('-');
+  const unique = new Set<string>([trimmed, base, baseLocale]);
+  return Array.from(unique).filter(Boolean);
+};
+
+const fetchDataset = async (code: string): Promise<ChangelogData | null> => {
+  try {
+    const response = await fetch(`/changelog/${code}.json`, { cache: 'no-cache' });
+    if (!response.ok) return null;
+    return (await response.json()) as ChangelogData;
+  } catch (err) {
+    console.warn('Failed to load changelog for locale', code, err);
+    return null;
+  }
+};
+
+const mergeChangelog = (base: ChangelogData, localized: ChangelogData | null): ChangelogData => {
+  if (!localized) {
+    return {
+      releases: (base.releases ?? []).map(cloneRelease),
+      upcoming: (base.upcoming ?? []).map(cloneUpcoming),
+    };
+  }
+
+  const localizedMap = new Map((localized.releases ?? []).map((entry) => [entry.version, entry as ReleaseEntry]));
+
+  const mergedReleases = (base.releases ?? []).map((baseEntry) => {
+    const override = localizedMap.get(baseEntry.version);
+    if (!override) return cloneRelease(baseEntry);
+    return {
+      version: baseEntry.version,
+      title: override.title ?? baseEntry.title,
+      date: override.date ?? baseEntry.date,
+      highlights:
+        override.highlights && override.highlights.length ? [...override.highlights] : [...baseEntry.highlights],
+      tag: override.tag ?? baseEntry.tag,
+      media:
+        override.media && override.media.length ? override.media.map(cloneMedia) : baseEntry.media?.map(cloneMedia),
+      // Deliberately not overridable: one list of people, shared by every language.
+      contributors: baseEntry.contributors?.map((person) => ({ ...person })),
+    };
+  });
+
+  const mergedUpcoming =
+    localized.upcoming && localized.upcoming.length
+      ? localized.upcoming.map(cloneUpcoming)
+      : (base.upcoming ?? []).map(cloneUpcoming);
+
+  return {
+    releases: mergedReleases,
+    upcoming: mergedUpcoming,
+  };
+};
+
+const loadChangelog = async () => {
+  const token = Symbol('changelog');
+  latestRequest = token;
+  loading.value = true;
+  error.value = '';
+  resolvedLocale.value = '';
+
+  const baseData = await fetchDataset(baseLocale);
+  if (latestRequest !== token) return;
+
+  if (!baseData) {
+    releases.value = [];
+    upcoming.value = [];
+    error.value = 'Missing base changelog at public/changelog/en.json.';
+    loading.value = false;
+    return;
+  }
+
+  let mergedData: ChangelogData = mergeChangelog(baseData, null);
+  let displayLocale = baseLocale;
+
+  const candidates = getLocaleFallbacks(locale.value).filter((code) => code !== baseLocale);
+
+  for (const candidate of candidates) {
+    const localizedData = await fetchDataset(candidate);
+    if (!localizedData) continue;
+    mergedData = mergeChangelog(baseData, localizedData);
+    displayLocale = candidate;
+    break;
+  }
+
+  if (latestRequest !== token) return;
+
+  releases.value = mergedData.releases ?? [];
+  upcoming.value = mergedData.upcoming ?? [];
+  resolvedLocale.value = displayLocale;
+  loading.value = false;
+};
+
+watch(
+  () => locale.value,
+  () => {
+    loadChangelog();
+  },
+  { immediate: true }
+);
+
+const markSeen = () => {
+  if (!currentAppVersion) return;
+  if (appStore.lastSeenChangelogVersion === currentAppVersion) return;
+  appStore.lastSeenChangelogVersion = currentAppVersion;
+};
+
+const closeAndTrack = () => {
+  markSeen();
+  closeModal();
+};
+
+onBeforeUnmount(() => {
+  markSeen();
+});
+</script>
+
+<style scoped>
+.changelog-card {
+  padding: 24px;
+}
+
+.changelog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.changelog-scroll {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding-right: 8px;
+}
+
+.changelog-state {
+  display: flex;
+  align-items: center;
+  padding: 24px 0;
+}
+
+.changelog-entry + .changelog-entry {
+  border-top: 1px solid rgba(var(--v-theme-outline), 0.2);
+  margin-top: 16px;
+  padding-top: 16px;
+}
+
+.entry-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.entry-title {
+  font-size: 1.15rem;
+  font-weight: 600;
+}
+
+.entry-subtitle {
+  display: flex;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 0.85rem;
+  color: rgba(var(--v-theme-on-surface), 0.65);
+}
+
+.entry-body {
+  margin-top: 12px;
+}
+
+.changelog-media-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.changelog-media-item {
+  margin: 0;
+}
+
+.changelog-media-img {
+  border-radius: 8px;
+  border: 1px solid rgba(var(--v-theme-outline), 0.2);
+  max-height: 150px;
+  width: auto;
+  object-fit: contain;
+}
+
+/* Opt-in per image (size: "large" in the JSON); everything else stays a thumbnail */
+.changelog-media-item--large {
+  grid-column: 1 / -1;
+}
+
+.changelog-media-item--large .changelog-media-img {
+  max-height: 360px;
+  width: 100%;
+}
+
+.changelog-media-button {
+  display: block;
+  position: relative;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  border-radius: 8px;
+  cursor: zoom-in;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.changelog-media-button:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+
+.changelog-media-button:focus-visible {
+  outline: 2px solid rgb(var(--v-theme-primary));
+  outline-offset: 2px;
+}
+
+.changelog-media-zoom {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background-color: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.changelog-media-button:hover .changelog-media-zoom,
+.changelog-media-button:focus-visible .changelog-media-zoom {
+  opacity: 1;
+}
+
+.changelog-lightbox {
+  cursor: zoom-out;
+}
+
+.changelog-lightbox-img {
+  border-radius: 8px;
+  background-color: rgb(var(--v-theme-surface));
+  max-height: 85vh;
+}
+
+.changelog-lightbox-caption {
+  margin-top: 8px;
+  text-align: center;
+  color: #fff;
+  font-size: 0.85rem;
+}
+
+.changelog-media-video {
+  border-radius: 8px;
+  border: 1px solid rgba(var(--v-theme-outline), 0.2);
+  max-height: 150px;
+  width: 100%;
+  background-color: #000;
+}
+
+.changelog-items {
+  margin: 12px 0 0;
+  padding-left: 20px;
+}
+
+.changelog-items li {
+  margin-bottom: 6px;
+}
+
+.changelog-contributors {
+  margin: 12px 0 0;
+}
+
+.changelog-contributor {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: inherit;
+  text-decoration: none;
+  vertical-align: middle;
+}
+
+a.changelog-contributor span {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+a.changelog-contributor:hover {
+  color: rgb(var(--v-theme-primary));
+}
+
+.changelog-avatar {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(var(--v-theme-on-surface), 0.08);
+}
+
+.changelog-upcoming {
+  border-top: 1px solid rgba(var(--v-theme-outline), 0.2);
+  margin-top: 24px;
+  padding-top: 16px;
+}
+
+.upcoming-card {
+  border: 1px dashed rgba(var(--v-theme-primary), 0.4);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-top: 12px;
+  background-color: rgba(var(--v-theme-primary), 0.03);
+}
+</style>

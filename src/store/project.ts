@@ -1,0 +1,376 @@
+// Utilities
+import { defineStore } from 'pinia';
+import { LinearStaticSolver, Beam2D } from 'ts-fem';
+import { ref, computed, reactive } from 'vue';
+import { max, min } from 'mathjs';
+import {
+  deleteElement,
+  deleteNode,
+  deserializeModel,
+  executeModelMutationWithUndo,
+  serializeModel,
+  throttle,
+} from '@/utils';
+import { ensureDimensionId } from '@/utils/id';
+import type { DimensionLine } from '@/types/dimension';
+import {
+  findMechanismIssues,
+  validateSolverModel,
+  type SolveDiagnostics,
+  type SolveIssue,
+} from '@/utils/validateSolverModel';
+
+export const useProjectStore = defineStore(
+  'project',
+  () => {
+    const model = ref('LinearStaticSolver');
+    const _solver = ref('');
+    const solver = ref(new LinearStaticSolver());
+
+    const nthEigenVector = ref(1);
+
+    const defoScale = ref(1);
+    const normalForceScale = ref(1);
+    const bendingMomentScale = ref(1);
+    const shearForceScale = ref(1);
+
+    const selection: {
+      label: number | string | null;
+      type: string | null;
+      x: number;
+      y: number;
+    } = reactive({
+      label: null,
+      type: null,
+      x: -999,
+      y: -999,
+    });
+
+    const selection2 = reactive<{
+      nodes: string[];
+      elements: string[];
+      nodalLoads: number[];
+      elementLoads: number[];
+      prescribedBC: number[];
+      dimensions: string[];
+    }>({
+      nodes: [],
+      elements: [],
+      nodalLoads: [],
+      elementLoads: [],
+      prescribedBC: [],
+      dimensions: [],
+    });
+
+    const clearSelection = () => {
+      selection.label = null;
+      selection.type = null;
+      selection.x = -999;
+      selection.y = -999;
+    };
+
+    const clearSelection2 = () => {
+      selection2.nodes = [];
+      selection2.elements = [];
+      selection2.nodalLoads = [];
+      selection2.elementLoads = [];
+      selection2.prescribedBC = [];
+      selection2.dimensions = [];
+    };
+
+    const isAnythingSelected2 = () => {
+      return (
+        selection2.nodes.length > 0 ||
+        selection2.elements.length > 0 ||
+        selection2.nodalLoads.length > 0 ||
+        selection2.elementLoads.length > 0 ||
+        selection2.prescribedBC.length > 0 ||
+        selection2.dimensions.length > 0
+      );
+    };
+
+    const hover: {
+      label: number | string | null;
+      type: string | null;
+      x: number;
+      y: number;
+    } = {
+      label: null,
+      type: null,
+      x: -999,
+      y: -999,
+    };
+
+    const nodes = computed(() => {
+      return [...solver.value.domain.nodes.values()];
+    });
+
+    const materials = computed(() => {
+      return [...solver.value.domain.materials.values()];
+    });
+
+    const crossSections = computed(() => {
+      return [...solver.value.domain.crossSections.values()];
+    });
+
+    const solveDiagnostics = ref<SolveDiagnostics>({
+      errors: [],
+      warnings: [],
+    });
+
+    const beams = computed(() => {
+      const vals = solver.value.domain.elements.values();
+      const arr = Array.from(vals);
+      const d = solver.value.domain;
+      return arr.filter((e) => e instanceof Beam2D && d.nodes.has(e.nodes[0]) && d.nodes.has(e.nodes[1])) as Beam2D[];
+    });
+
+    const _solve = () => {
+      solver.value.codeNumberGenerated = false;
+
+      const diagnostics = validateSolverModel(solver.value);
+      solveDiagnostics.value = diagnostics;
+
+      if (diagnostics.errors.length > 0) {
+        solver.value.loadCases[0].solved = false;
+        return;
+      }
+
+      if (solver.value.domain.elements.size === 0 || solver.value.domain.nodes.size === 0) return;
+
+      const failWith = (...issues: SolveIssue[]) => {
+        solveDiagnostics.value = {
+          errors: [...diagnostics.errors, ...issues],
+          warnings: diagnostics.warnings,
+        };
+        solver.value.loadCases[0].solved = false;
+      };
+
+      try {
+        solver.value.solve();
+      } catch (e) {
+        // mathjs reports an exactly singular system, which for a structure means a mechanism.
+        const isSingular = /singular/i.test(e instanceof Error ? e.message : String(e));
+
+        failWith({
+          level: 'error',
+          code: isSingular ? 'SINGULAR_STIFFNESS_MATRIX' : 'SOLVER_RUNTIME_EXCEPTION',
+          message: isSingular
+            ? 'Structure is a mechanism: the stiffness matrix is singular. Check that every part is held by at least 3 restraints and that end hinges do not leave a member free to rotate.'
+            : 'Solver failed due to an internal model inconsistency. Please review model references and loads.',
+        });
+        return;
+      }
+
+      // Insufficient supports are already reported by validateSolverModel before we get here.
+      // What is left is a structure that is restrained on paper but still a mechanism, which
+      // the solver answers with runaway displacements rather than an exception.
+      const mechanismIssues = findMechanismIssues(solver.value);
+
+      if (mechanismIssues.length > 0) {
+        failWith(...mechanismIssues);
+        return;
+      }
+
+      let maxDefo = 1e-32; //Math.max(Math.abs(max(r)), Math.abs(min(r)));
+      let maxNormalForce = 1e-32;
+      let maxBendingMoment = 1e-32;
+      let maxShearForce = 1e-32;
+
+      for (const beam of solver.value.domain.elements.values()) {
+        let def = (beam as Beam2D).computeGlobalDefl(solver.value.loadCases[0], 10);
+
+        const n = (beam as Beam2D).computeNormalForce(solver.value.loadCases[0], 10).N as number[];
+        const v = (beam as Beam2D).computeShearForce(solver.value.loadCases[0], 10).V as number[];
+        const m = (beam as Beam2D).computeBendingMoment(solver.value.loadCases[0], 10).M as number[];
+
+        if (model.value === 'LinearStaticSolver') {
+          maxDefo = Math.max(
+            maxDefo,
+            Math.abs(max(def.u)),
+            Math.abs(min(def.u)),
+            Math.abs(max(def.w)),
+            Math.abs(min(def.w))
+          );
+        } else if (model.value === 'EigenValueDynamicSolver') {
+          def = (beam as Beam2D).computeGlobalEigenMode(
+            solver.value.loadCases[0],
+            useProjectStore().nthEigenVector - 1,
+            10
+          );
+
+          maxDefo = Math.max(
+            maxDefo,
+            Math.abs(max(def.u)),
+            Math.abs(min(def.u)),
+            Math.abs(max(def.w)),
+            Math.abs(min(def.w))
+          );
+        }
+
+        maxNormalForce = Math.max(maxNormalForce, Math.abs(max(n)), Math.abs(min(n)));
+
+        maxBendingMoment = Math.max(maxBendingMoment, Math.abs(max(m)), Math.abs(min(m)));
+
+        maxShearForce = Math.max(maxShearForce, Math.abs(max(v)), Math.abs(min(v)));
+      }
+
+      if (maxDefo === 1e-32 && solver.value.loadCases[0].prescribedBC.length > 0) {
+        for (const bc of solver.value.loadCases[0].prescribedBC) {
+          const ux = Math.abs(bc.prescribedValues[0]);
+          const uz = Math.abs(bc.prescribedValues[2]);
+          maxDefo = Math.max(maxDefo, ux, uz);
+        }
+      }
+
+      // Every diagram is scaled to its own largest value, which turns a quantity that is zero -
+      // no normal force in a beam, say - into a full height plot of floating point dust. Such a
+      // quantity gets no scale at all, so it is drawn flat on its axis.
+      const NEGLIGIBLE_RATIO = 1e-6;
+      const largestForce = Math.max(maxNormalForce, maxShearForce, maxBendingMoment);
+
+      const scaleFor = (value: number, reference: number) => (value > reference * NEGLIGIBLE_RATIO ? 1 / value : 0);
+
+      useProjectStore().defoScale = maxDefo > 1e-30 ? 1 / maxDefo : 0;
+      useProjectStore().normalForceScale = scaleFor(maxNormalForce, largestForce);
+      useProjectStore().bendingMomentScale = scaleFor(maxBendingMoment, largestForce);
+      useProjectStore().shearForceScale = scaleFor(maxShearForce, largestForce);
+    };
+
+    const solve = throttle(_solve, 50);
+
+    const selectAll2 = () => {
+      clearSelection2();
+
+      for (const node of solver.value.domain.nodes.values()) {
+        selection2.nodes.push(node.label);
+      }
+
+      for (const element of solver.value.domain.elements.values()) {
+        selection2.elements.push(element.label);
+      }
+
+      for (let i = 0; i < solver.value.loadCases[0].nodalLoadList.length; i++) {
+        selection2.nodalLoads.push(i);
+      }
+
+      for (let i = 0; i < solver.value.loadCases[0].elementLoadList.length; i++) {
+        selection2.elementLoads.push(i);
+      }
+
+      for (let i = 0; i < solver.value.loadCases[0].prescribedBC.length; i++) {
+        selection2.prescribedBC.push(i);
+      }
+
+      for (const dim of dimensions.value) {
+        selection2.dimensions.push(ensureDimensionId(dim));
+      }
+    };
+
+    const deleteSelection2 = () => {
+      executeModelMutationWithUndo(() => {
+        let toDelete = [];
+        for (const element of selection2.elements) {
+          toDelete.push(element);
+        }
+
+        for (const element of toDelete) {
+          deleteElement(element, false);
+        }
+
+        toDelete = [];
+        for (const node of selection2.nodes) {
+          toDelete.push(node);
+        }
+
+        for (const node of toDelete) {
+          deleteNode(node, false);
+        }
+
+        const loadCase = solver.value.loadCases[0];
+        for (const i of [...selection2.nodalLoads].sort((a, b) => b - a)) {
+          if (loadCase.nodalLoadList[i] === undefined) continue;
+
+          loadCase.solved = false;
+          loadCase.nodalLoadList.splice(i, 1);
+        }
+
+        for (const i of [...selection2.elementLoads].sort((a, b) => b - a)) {
+          if (loadCase.elementLoadList[i] === undefined) continue;
+
+          loadCase.solved = false;
+          loadCase.elementLoadList.splice(i, 1);
+        }
+
+        for (const i of [...selection2.prescribedBC].sort((a, b) => b - a)) {
+          if (loadCase.prescribedBC[i] === undefined) continue;
+
+          loadCase.solved = false;
+          loadCase.prescribedBC.splice(i, 1);
+        }
+
+        if (selection2.dimensions.length > 0) {
+          const toDelete = new Set(selection2.dimensions);
+          dimensions.value = dimensions.value.filter((dim) => !toDelete.has(ensureDimensionId(dim)));
+        }
+
+        clearSelection();
+        clearSelection2();
+      });
+    };
+
+    const dimensions = ref<DimensionLine[]>([]);
+
+    return {
+      solve,
+      model,
+      selection,
+      selection2,
+      clearSelection,
+      clearSelection2,
+      deleteSelection2,
+      selectAll2,
+      isAnythingSelected2,
+      hover,
+      _solver,
+      solver,
+      nthEigenVector,
+      defoScale,
+      normalForceScale,
+      bendingMomentScale,
+      shearForceScale,
+
+      nodes,
+      beams,
+      materials,
+      crossSections,
+      dimensions,
+      solveDiagnostics,
+    };
+  },
+  {
+    persist: {
+      pick: ['solver', 'dimensions', '_solver'],
+      serializer: {
+        serialize: (value) => {
+          return serializeModel(value.solver, value.dimensions);
+        },
+        deserialize: (value) => {
+          console.log(value);
+          if (value === undefined) return { _solver: '' };
+          return { _solver: value };
+        },
+      },
+      afterHydrate: (ctx) => {
+        // console.log(ctx.store.$state);
+        if (ctx.store._solver === '') return;
+
+        try {
+          deserializeModel(ctx.store._solver, ctx.store.solver, ctx.store.dimensions);
+        } catch (e) {
+          console.error(e);
+        }
+      },
+    },
+  }
+);

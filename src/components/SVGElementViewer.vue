@@ -1,0 +1,857 @@
+<script setup lang="ts">
+import SvgPanZoom from './SVGPanZoom2.vue';
+import SvgGrid from './SVGGrid.vue';
+import SvgViewerDefs from './SVGViewerDefs.vue';
+import { ref, onMounted, computed, watch, provide } from 'vue';
+
+import { throttle } from '../utils/throttle';
+import {
+  Node,
+  DofID,
+  Beam2D,
+  Element,
+  NodalLoad,
+  BeamElementLoad,
+  LinearStaticSolver,
+  BeamElementTrapezoidalEdgeLoad,
+  BeamElementUniformEdgeLoad,
+  BeamConcentratedLoad,
+  PrescribedDisplacement,
+} from 'ts-fem';
+import { Matrix, max, min } from 'mathjs';
+
+import SVGElementLoad from './svg/ElementLoad.vue';
+import SVGElementConcentratedLoad from './svg/ElementConcentratedLoad.vue';
+import SVGNodalLoad from './svg/NodalLoad.vue';
+import SVGPrescribedDisplacement from './svg/PrescribedDisplacement.vue';
+import SVGNode from './svg/Node.vue';
+import SVGElement from './svg/Element.vue';
+import SVGElementTemperatureLoad from './svg/ElementTemperatureLoad.vue';
+import SVGDimensioning from './svg/Dimensioning.vue';
+import { loadType } from '../utils/loadType';
+import { boundsFromPoints, type ViewBox } from '@/utils/fitBounds';
+import type { DimensionRenderableNode } from '@/types/dimension';
+
+const props = withDefaults(
+  defineProps<{
+    id?: string;
+    solver: LinearStaticSolver;
+    showGrid?: boolean;
+    showElements?: boolean;
+    showNodes?: boolean;
+    showLoads?: boolean;
+    showSupports?: boolean;
+    showNodeLabels?: boolean;
+    showElementLabels?: boolean;
+    showDeformedShape?: boolean;
+    showNormalForce?: boolean;
+    showShearForce?: boolean;
+    showMoments?: boolean;
+    showReactions?: boolean;
+    elements: Element[];
+    nodes: Node[];
+    nodalLoads?: NodalLoad[];
+    elementLoads?: BeamElementLoad[];
+    prescribedDisplacements?: PrescribedDisplacement[];
+    dimlines?: {
+      points: DimensionRenderableNode[];
+      distance: number;
+      numberFormat?: Intl.NumberFormat;
+      convertLength?: (value: number) => number;
+    }[];
+    padding?: number;
+    mobilePadding?: number;
+    resultsScalePx?: number;
+    /** Decorations excluded from the fit (their room comes from `fitReservePx`). */
+    fitIgnore?: string;
+    /** Pixels kept free around the structure on every side; defaults to results + loads + a label. */
+    fitReservePx?: number;
+    /**
+     * The viewer never draws results or loads, so the fit reserves no room for them.
+     * Without it a small preview (the widget header is 64x48) spends most of its box on
+     * space for diagrams it never shows and the structure comes out absurdly small.
+     */
+    noFitForResults?: boolean;
+    colors?: {
+      normalForce: string;
+      shearForce: string;
+      bendingMoment: string;
+      deformedShape: string;
+      loads: string;
+      nodes: string;
+      elements: string;
+      reactions: string;
+    };
+    supportSize?: number;
+    convertForce?: (value: number) => number;
+    convertForceDistance?: (value: number) => number;
+    convertMoment?: (value: number) => number;
+    convertLength?: (value: number) => number;
+    resultLabelMode?: 'axis' | 'horizontal';
+    numberFormat?: Intl.NumberFormat;
+    zoomEnabled?: boolean;
+    fontSize?: number;
+  }>(),
+  {
+    id: new Date().getTime().toString(),
+    showGrid: false,
+    showElements: true,
+    showNodes: true,
+    showLoads: false,
+    showSupports: true,
+    showNodeLabels: false,
+    showElementLabels: false,
+    showDeformedShape: false,
+    showNormalForce: false,
+    showShearForce: false,
+    showMoments: false,
+    showReactions: false,
+    elements: () => [],
+    nodes: () => [],
+    nodalLoads: () => [],
+    elementLoads: () => [],
+    prescribedDisplacements: () => [],
+    dimlines: () => [],
+    padding: 12,
+    mobilePadding: 12,
+    resultsScalePx: 64,
+    fitIgnore: '[data-fit-ignore]',
+    fitReservePx: undefined,
+    noFitForResults: false,
+    colors: () => {
+      return {
+        normalForce: '#2222ff',
+        shearForce: '#00af00',
+        bendingMoment: '#ff2222',
+        deformedShape: '#555555',
+        loads: '#ff8700',
+        nodes: '#000000',
+        elements: '#000000',
+        reactions: '#a020f0',
+      };
+    },
+    supportSize: 1,
+    convertForce: (v) => v,
+    convertForceDistance: (v) => v,
+    convertMoment: (v) => v,
+    convertLength: (v) => v,
+    resultLabelMode: 'axis',
+    numberFormat: () => new Intl.NumberFormat(),
+    zoomEnabled: false,
+    fontSize: 13,
+  }
+);
+
+const panZoom = ref<InstanceType<typeof SvgPanZoom> | null>(null);
+const grid = ref<InstanceType<typeof SvgGrid> | null>(null);
+
+const svg = ref<SVGSVGElement>();
+const viewport = ref<SVGGElement>();
+
+provide('viewer_uuid', props.id);
+
+const update = () => {
+  updateResultScales();
+  fitContent();
+};
+
+const updateResultScales = () => {
+  if (!props.solver.loadCases[0].solved) return;
+
+  let maxDefo = 0;
+  let maxNormalForce = 0;
+  let maxBendingMoment = 0;
+  let maxShearForce = 0;
+
+  for (const beam of props.solver.domain.elements.values()) {
+    const def = (beam as Beam2D).computeGlobalDefl(props.solver.loadCases[0], 10);
+
+    const n = (beam as Beam2D).computeNormalForce(props.solver.loadCases[0], 10).N as number[];
+    const v = (beam as Beam2D).computeShearForce(props.solver.loadCases[0], 10).V as number[];
+    const m = (beam as Beam2D).computeBendingMoment(props.solver.loadCases[0], 10).M as number[];
+
+    maxDefo = Math.max(maxDefo, Math.abs(max(def.u)), Math.abs(min(def.u)), Math.abs(max(def.w)), Math.abs(min(def.w)));
+
+    maxNormalForce = Math.max(maxNormalForce, Math.abs(max(n)), Math.abs(min(n)));
+
+    maxBendingMoment = Math.max(maxBendingMoment, Math.abs(max(m)), Math.abs(min(m)));
+
+    maxShearForce = Math.max(maxShearForce, Math.abs(max(v)), Math.abs(min(v)));
+  }
+
+  defoScale.value = 1 / maxDefo;
+  normalForceScale.value = 1 / maxNormalForce;
+  bendingMomentScale.value = 1 / maxBendingMoment;
+  shearForceScale.value = 1 / maxShearForce;
+};
+
+watch(props.solver, update);
+watch(() => [props.nodes, props.elements], update);
+// watch(props.elements, update);
+watch(() => props.showDeformedShape, update);
+watch(() => props.showNormalForce, update);
+watch(() => props.showShearForce, update);
+watch(() => props.showMoments, update);
+
+const defoScale = ref(1);
+const normalForceScale = ref(1);
+const bendingMomentScale = ref(1);
+const shearForceScale = ref(1);
+
+const scale = computed(() => {
+  if (panZoom.value) return panZoom.value.scale;
+
+  return 1;
+});
+
+onMounted(() => {
+  window.setTimeout(update, 100);
+});
+
+const centerContent = () => {
+  if (!panZoom.value) return;
+
+  panZoom.value.centerContent();
+
+  if (grid.value) grid.value.refreshGrid(true);
+};
+
+/** Resolves with the fit once its final view is shown; `null` when a newer fit took over. */
+const fitContent = async () => {
+  if (!panZoom.value) return null;
+
+  const result = await panZoom.value.fitContent();
+
+  if (grid.value) grid.value.refreshGrid(true);
+
+  return result;
+};
+
+/** Distributed load arrows are drawn 60 px long (see ElementLoad/UDL.vue). */
+const LOAD_DECORATION_PX = 60;
+
+/**
+ * Space kept around the structure for result diagrams, loads and one line of
+ * labels. It does not depend on what is currently shown, so toggling results or
+ * loads (or animating `resultsScalePx` below the load size) never moves the view.
+ */
+const fitReserve = computed(() => {
+  if (props.fitReservePx !== undefined) return props.fitReservePx;
+  if (props.noFitForResults) return 0;
+
+  return Math.max(props.resultsScalePx, LOAD_DECORATION_PX) + props.fontSize + 8;
+});
+
+/**
+ * Endpoints of everything drawn. Elements are included because a preview can be given elements
+ * without their nodes (the widget header does), and a fit with no bounds falls back to measuring
+ * the rendered SVG - decorations sized from the not yet fitted scale included.
+ */
+const modelBounds = () => {
+  const points = props.nodes.map((node) => [node.coords[0], node.coords[2]] as const);
+
+  for (const element of props.elements) {
+    for (const label of element.nodes) {
+      const node = element.domain.nodes.get(label);
+      if (node) points.push([node.coords[0], node.coords[2]] as const);
+    }
+  }
+
+  return boundsFromPoints(points);
+};
+
+const onUpdate = throttle((zooming: boolean) => {
+  if (grid.value) grid.value.refreshGrid(zooming);
+}, 100);
+
+const dynamicMarker = (label: string) => {
+  return `url(#${props.id}-${label})`;
+};
+
+// Computed dynamic markers
+const markerForce = computed(() => dynamicMarker('force'));
+const markerForceHover = computed(() => dynamicMarker('force_hover'));
+const markerForceSelected = computed(() => dynamicMarker('force_selected'));
+const markerCentered = computed(() => dynamicMarker('force_centered'));
+const markerCenteredHover = computed(() => dynamicMarker('force_centered_hover'));
+
+const markerMomentCw = computed(() => dynamicMarker('moment_cw'));
+const markerMomentCwHover = computed(() => dynamicMarker('moment_cw_hover'));
+const markerMomentCwSelected = computed(() => dynamicMarker('moment_cw_selected'));
+
+const markerMomentCcw = computed(() => dynamicMarker('moment_ccw'));
+const markerMomentCcwHover = computed(() => dynamicMarker('moment_ccw_hover'));
+const markerMomentCcwSelected = computed(() => dynamicMarker('moment_ccw_selected'));
+
+const markerRotationCw = computed(() => dynamicMarker('rotation_cw'));
+const markerRotationCcw = computed(() => dynamicMarker('rotation_ccw'));
+
+const markerRotationCwHover = computed(() => dynamicMarker('rotation_cw_hover'));
+const markerRotationCwSelected = computed(() => dynamicMarker('rotation_cw_selected'));
+const markerRotationCcwHover = computed(() => dynamicMarker('rotation_ccw_hover'));
+const markerRotationCcwSelected = computed(() => dynamicMarker('rotation_ccw_selected'));
+
+const markerReaction = computed(() => dynamicMarker('reaction'));
+const markerMomentReactionCcw = computed(() => dynamicMarker('moment_reaction_ccw'));
+const markerMomentReactionCw = computed(() => dynamicMarker('moment_reaction_cw'));
+const markerDot = computed(() => dynamicMarker('dot'));
+const markerDotMovingX = computed(() => dynamicMarker('dot-moving-x'));
+const markerDotTorsion = computed(() => dynamicMarker('dot-torsion'));
+const markerHingeXY = computed(() => dynamicMarker('hinge-xy'));
+const markerHingeX = computed(() => dynamicMarker('hinge-x'));
+const markerHingeY = computed(() => dynamicMarker('hinge-y'));
+const markerForceTip = computed(() => dynamicMarker('forceTip'));
+const markerForceTipHover = computed(() => dynamicMarker('forceTip_hover'));
+const markerForceTipSelected = computed(() => dynamicMarker('forceTip_selected'));
+const markerDimTip = computed(() => dynamicMarker('dimTip'));
+
+const markerTextLabel = computed(() => dynamicMarker('textLabel'));
+
+/** Show exactly this model-space box instead of fitting; diagram scales are refreshed first. */
+const setView = (box: ViewBox) => {
+  updateResultScales();
+  panZoom.value?.setViewBox(box);
+};
+
+defineExpose({ centerContent, fitContent, setView, update });
+</script>
+
+<template>
+  <div class="d-flex flex-column fill-height svg-viewer" style="z-index: 1">
+    <svg v-if="false" class="w-100 fill-height" style="position: absolute">
+      <SvgGrid ref="grid" :svg="svg as SVGSVGElement" :viewport="viewport as SVGGElement" :zoom="scale" />
+    </svg>
+
+    <SvgPanZoom
+      ref="panZoom"
+      :on-update="onUpdate"
+      :padding="props.padding"
+      :mobile-padding="props.mobilePadding"
+      :zoom-enabled="props.zoomEnabled"
+      :model-bounds="modelBounds"
+      :fit-ignore="props.fitIgnore"
+      :fit-reserve="fitReserve"
+      style="overflow: visible; z-index: 50; min-height: 0"
+    >
+      <svg
+        ref="svg"
+        :style="{
+          opacity: panZoom?.fitted ? 1 : 0,
+          '--marker-force': markerForce,
+          '--marker-force-hover': markerForceHover,
+          '--marker-force-selected': markerForceSelected,
+          '--marker-centered': markerCentered,
+          '--marker-centered-hover': markerCenteredHover,
+          '--marker-moment-cw': markerMomentCw,
+          '--marker-moment-cw-hover': markerMomentCwHover,
+          '--marker-moment-cw-selected': markerMomentCwSelected,
+          '--marker-moment-ccw': markerMomentCcw,
+          '--marker-moment-ccw-hover': markerMomentCcwHover,
+          '--marker-moment-ccw-selected': markerMomentCcwSelected,
+          '--marker-rotation-cw': markerRotationCw,
+          '--marker-rotation-ccw': markerRotationCcw,
+          '--marker-rotation-cw-hover': markerRotationCwHover,
+          '--marker-rotation-cw-selected': markerRotationCwSelected,
+          '--marker-rotation-ccw-hover': markerRotationCcwHover,
+          '--marker-rotation-ccw-selected': markerRotationCcwSelected,
+          '--marker-reaction': markerReaction,
+          '--marker-moment-reaction-ccw': markerMomentReactionCcw,
+          '--marker-moment-reaction-cw': markerMomentReactionCw,
+          '--marker-dot': markerDot,
+          '--marker-dot-moving-x': markerDotMovingX,
+          '--marker-dot-torsion': markerDotTorsion,
+          '--marker-hinge-xy': markerHingeXY,
+          '--marker-hinge-x': markerHingeX,
+          '--marker-hinge-y': markerHingeY,
+          '--marker-force-tip': markerForceTip,
+          '--marker-force-tip-hover': markerForceTipHover,
+          '--marker-force-tip-selected': markerForceTipSelected,
+          '--marker-dim-tip': markerDimTip,
+          '--filter-text-label': markerTextLabel,
+          '--colors-loads': props.colors.loads,
+        }"
+      >
+        <SvgViewerDefs :id="id" :colors="colors" :support-size="supportSize" :scale="scale" />
+        <g ref="viewport">
+          <g>
+            <g v-if="props.showLoads" data-fit-ignore="loads">
+              <template v-for="(eload, index) in props.elementLoads">
+                <SVGElementLoad
+                  v-if="eload instanceof BeamElementUniformEdgeLoad || eload instanceof BeamElementTrapezoidalEdgeLoad"
+                  :key="`element-udl-${index}`"
+                  :data-element-load-id="index"
+                  :eload="eload"
+                  :scale="scale"
+                  :convert-force-distance="props.convertForceDistance"
+                  :font-size="props.fontSize"
+                  :number-format="props.numberFormat"
+                />
+                <SVGElementTemperatureLoad
+                  v-else-if="loadType(eload) === 'temperature'"
+                  :key="`element-temperature-${index}`"
+                  :data-element-load-id="index"
+                  :eload="eload"
+                  :scale="scale"
+                  :convert-force="props.convertForce"
+                  :font-size="props.fontSize"
+                  :number-format="props.numberFormat"
+                />
+                <SVGElementConcentratedLoad
+                  v-else-if="eload instanceof BeamConcentratedLoad"
+                  :key="`element-cl-${index}`"
+                  :data-element-load-id="index"
+                  :eload="eload"
+                  :scale="scale"
+                  :convert-force="props.convertForce"
+                  :convert-moment="props.convertMoment"
+                  :font-size="props.fontSize"
+                  :number-format="props.numberFormat"
+                />
+              </template>
+            </g>
+          </g>
+          <g>
+            <SVGElement
+              v-for="(element, index) in props.elements"
+              :key="`element-geometry-${index}`"
+              :show-geometry="true"
+              :show-results="false"
+              :element="element"
+              :scale="scale"
+              :show-deformed-shape="props.showDeformedShape"
+              :show-normal-force="props.showNormalForce"
+              :show-shear-force="props.showShearForce"
+              :show-bending-moment="props.showMoments"
+              :show-label="props.showElementLabels"
+              :load-case="props.solver.loadCases[0]"
+              :deformed-shape-multiplier="defoScale * props.resultsScalePx"
+              :normal-force-multiplier="normalForceScale * props.resultsScalePx"
+              :shear-force-multiplier="shearForceScale * props.resultsScalePx"
+              :bending-moment-multiplier="bendingMomentScale * props.resultsScalePx"
+              :result-label-mode="props.resultLabelMode"
+              :convert-force="props.convertForce"
+              :convert-moment="props.convertMoment"
+              :font-size="props.fontSize"
+              :number-format="props.numberFormat"
+            />
+          </g>
+
+          <g>
+            <SVGElement
+              v-for="(element, index) in props.elements"
+              :key="`element-results-${index}`"
+              :show-geometry="false"
+              :show-results="true"
+              :element="element"
+              :scale="scale"
+              :show-deformed-shape="props.showDeformedShape"
+              :show-normal-force="props.showNormalForce"
+              :show-shear-force="props.showShearForce"
+              :show-bending-moment="props.showMoments"
+              :show-label="props.showElementLabels"
+              :load-case="props.solver.loadCases[0]"
+              :deformed-shape-multiplier="defoScale * props.resultsScalePx"
+              :normal-force-multiplier="normalForceScale * props.resultsScalePx"
+              :shear-force-multiplier="shearForceScale * props.resultsScalePx"
+              :bending-moment-multiplier="bendingMomentScale * props.resultsScalePx"
+              :result-label-mode="props.resultLabelMode"
+              :convert-force="props.convertForce"
+              :convert-moment="props.convertMoment"
+              :font-size="props.fontSize"
+              :number-format="props.numberFormat"
+            />
+          </g>
+
+          <!-- Painted above the elements, matching the drawing, so a load is never hidden by a beam. -->
+          <g v-if="props.showLoads" data-fit-ignore="loads">
+            <SVGNodalLoad
+              v-for="(nload, index) in props.nodalLoads"
+              :key="`nodal-load-${index}`"
+              :nload="nload"
+              :scale="scale"
+              :convert-force="props.convertForce"
+              :font-size="props.fontSize"
+              :number-format="props.numberFormat"
+            />
+            <SVGPrescribedDisplacement
+              v-for="(nload, index) in props.prescribedDisplacements"
+              :key="`nodal-load-${index}`"
+              :nload="nload"
+              :scale="scale"
+              :convert-length="props.convertLength"
+              :multiplier="defoScale * props.resultsScalePx"
+              :font-size="props.fontSize"
+              :number-format="props.numberFormat"
+            />
+          </g>
+          <g class="nodes">
+            <g v-for="(node, index) in props.nodes" :key="`node-${index}`">
+              <SVGNode
+                :node="node"
+                :scale="scale"
+                :show-label="props.showNodeLabels"
+                :show-supports="props.showSupports"
+                :show-deformed-shape="props.showDeformedShape"
+                :show-reactions="props.showReactions"
+                :convert-force="props.convertForce"
+                :convert-moment="props.convertMoment"
+                :load-case="props.solver.loadCases[0]"
+                :multiplier="defoScale * props.resultsScalePx"
+                :font-size="props.fontSize"
+                :number-format="props.numberFormat"
+              />
+            </g>
+          </g>
+
+          <g>
+            <SVGDimensioning
+              v-for="(dim, index) in props.dimlines"
+              :key="index"
+              :points="dim.points"
+              :distance="dim.distance"
+              :scale="scale"
+              :font-size="props.fontSize"
+              :number-format="dim.numberFormat ?? props.numberFormat"
+              :convert-length="dim.convertLength ?? props.convertLength"
+              :interactive="false"
+            />
+          </g>
+        </g>
+      </svg>
+    </SvgPanZoom>
+  </div>
+</template>
+
+<style lang="scss" scoped>
+.svg-viewer :deep(*) {
+  .element-load.load-1d {
+    text {
+      fill: v-bind('colors.loads');
+    }
+
+    stroke-linecap: butt;
+
+    &:hover text {
+      //fill: blue;
+      font-weight: bold;
+    }
+
+    use {
+      stroke: v-bind('colors.loads');
+    }
+
+    use:hover {
+      stroke-width: 3px; /* affects the referenced element */
+    }
+
+    &:hover path.drawable,
+    &:hover polygon.drawable {
+      //stroke: blue;
+      stroke-width: 3px;
+    }
+
+    &:hover polyline {
+      marker-end: var(--marker-centered-hover);
+    }
+
+    polygon,
+    path {
+      stroke: v-bind('colors.loads');
+      stroke-width: 1px;
+
+      &.handle {
+        stroke-width: 12px;
+        stroke: transparent;
+      }
+    }
+
+    polyline {
+      marker-end: var(--marker-centered);
+    }
+
+    &.selected {
+      text {
+        fill: rgb(0, 55, 149);
+      }
+
+      polygon.drawable,
+      path.drawable {
+        stroke: rgb(0, 94, 255);
+        stroke-width: 4px;
+        stroke-linejoin: round;
+        fill: rgba(0, 55, 149, 0.15);
+      }
+
+      use {
+        stroke-width: 3px; /* affects the referenced element */
+        stroke: rgb(0, 94, 255);
+      }
+    }
+  }
+
+  .element.element-1d {
+    polyline {
+      fill: none;
+      stroke: black;
+      stroke-width: 2px;
+      &.handle {
+        cursor: pointer;
+        stroke-width: 24px;
+        stroke: transparent;
+      }
+      &.decoration {
+        stroke-width: 1px;
+      }
+    }
+    &:hover {
+      & polyline.drawable {
+        stroke: black;
+        stroke-width: 5px;
+      }
+    }
+    &.selected {
+      & polyline.drawable {
+        stroke: rgb(0, 94, 255);
+        stroke-width: 5px;
+      }
+    }
+
+    polyline.fibers {
+      stroke: #666;
+      stroke-width: 1px;
+    }
+    path.deformedShape {
+      fill: none;
+      stroke: v-bind('colors.deformedShape');
+      stroke-width: 2px;
+      &.decoration {
+        stroke-width: 1px;
+      }
+    }
+    .normal polyline {
+      stroke: v-bind('colors.normalForce');
+      stroke-width: 1px;
+      fill: v-bind('colors.normalForce');
+      fill-opacity: 0.1;
+      &:hover {
+        fill-opacity: 0.2;
+      }
+    }
+    .shear polyline {
+      stroke: v-bind('colors.shearForce');
+      stroke-width: 1px;
+      fill: v-bind('colors.shearForce');
+      fill-opacity: 0.1;
+      &:hover {
+        fill-opacity: 0.2;
+      }
+    }
+    .moment polyline {
+      stroke: v-bind('colors.bendingMoment');
+      stroke-width: 1px;
+      fill: v-bind('colors.bendingMoment');
+      fill-opacity: 0.1;
+      &:hover {
+        fill-opacity: 0.2;
+      }
+    }
+  }
+
+  .node {
+    polyline {
+      stroke: #000;
+      stroke-linecap: square;
+      stroke-width: 6px;
+      vector-effect: non-scaling-stroke;
+      &.handle {
+        cursor: pointer;
+        stroke-width: 24px;
+        stroke: transparent;
+      }
+      &.decoration {
+        stroke-width: 1px;
+        stroke: none;
+      }
+      &.drawable.deformed {
+        stroke: v-bind('colors.deformedShape');
+      }
+    }
+    &:hover polyline.drawable {
+      stroke: black;
+      stroke-width: 10px;
+    }
+    &.selected polyline.drawable {
+      stroke: rgb(0, 55, 149);
+      stroke-width: 8px;
+    }
+  }
+
+  .prescribed polyline {
+    stroke: v-bind('colors.loads');
+  }
+
+  .nodal-load {
+    text {
+      fill: v-bind('colors.loads');
+    }
+    polyline {
+      stroke-linecap: butt;
+      vector-effect: non-scaling-stroke;
+      &.decoration.force {
+        marker-end: var(--marker-force);
+      }
+
+      &.decoration.moment.cw {
+        marker-end: var(--marker-moment-cw);
+      }
+
+      &.decoration.moment.ccw {
+        marker-end: var(--marker-moment-ccw);
+      }
+
+      &.decoration.rotation.cw {
+        marker-end: var(--marker-rotation-cw);
+      }
+
+      &.decoration.rotation.ccw {
+        marker-end: var(--marker-rotation-ccw);
+      }
+      &.handle {
+        stroke: transparent;
+        stroke-width: 24px;
+      }
+
+      &.handle.moment {
+        stroke: transparent;
+        stroke-width: 38px;
+      }
+    }
+    &:hover text {
+      //fill: blue;
+      font-weight: bold;
+    }
+
+    &:hover polyline.decoration.force {
+      marker-end: var(--marker-force-hover);
+    }
+
+    &:hover polyline.decoration.moment.cw {
+      marker-end: var(--marker-moment-cw-hover);
+    }
+
+    &:hover polyline.decoration.moment.ccw {
+      marker-end: var(--marker-moment-ccw-hover);
+    }
+
+    &:hover polyline.decoration.rotation.cw {
+      marker-end: var(--marker-rotation-cw-hover);
+    }
+
+    &:hover polyline.decoration.rotation.ccw {
+      marker-end: var(--marker-rotation-ccw-hover);
+    }
+
+    /* The prescribed translation is a real line, so it gets the highlight the arrow markers give. */
+    &:hover polyline.decoration.marker-forceTip {
+      marker-end: var(--marker-force-tip-hover);
+      stroke-width: 2px;
+    }
+
+    &.selected polyline.decoration.force {
+      marker-end: var(--marker-force-selected);
+    }
+
+    &.selected polyline.decoration.moment.cw {
+      marker-end: var(--marker-moment-cw-selected);
+    }
+
+    &.selected polyline.decoration.moment.ccw {
+      marker-end: var(--marker-moment-ccw-selected);
+    }
+
+    &.selected polyline.decoration.rotation.cw {
+      marker-end: var(--marker-rotation-cw-selected);
+    }
+
+    &.selected polyline.decoration.rotation.ccw {
+      marker-end: var(--marker-rotation-ccw-selected);
+    }
+
+    &.selected polyline.decoration.marker-forceTip {
+      marker-end: var(--marker-force-tip-selected);
+      stroke: rgb(0, 55, 149);
+      stroke-width: 2px;
+    }
+    &.selected {
+      text {
+        fill: rgb(0, 55, 149);
+      }
+    }
+  }
+
+  .normal text {
+    fill: v-bind('colors.normalForce');
+  }
+
+  .shear text {
+    fill: v-bind('colors.shearForce');
+  }
+
+  .moment text {
+    fill: v-bind('colors.bendingMoment');
+  }
+
+  .reaction {
+    fill: v-bind('colors.reactions');
+  }
+
+  .marker-reaction {
+    marker-start: var(--marker-reaction);
+  }
+
+  .marker-moment_reaction_ccw {
+    marker-start: var(--marker-moment-reaction-ccw);
+  }
+
+  .marker-moment_reaction_cw {
+    marker-start: var(--marker-moment-reaction-cw);
+  }
+
+  .marker-dot {
+    marker-start: var(--marker-dot);
+  }
+
+  .marker-dot-moving-x {
+    marker-start: var(--marker-dot-moving-x);
+  }
+
+  .marker-dot-torsion {
+    marker-start: var(--marker-dot-torsion);
+  }
+
+  .marker-hinge-xy {
+    marker-start: var(--marker-hinge-xy);
+  }
+
+  .marker-hinge-x {
+    marker-start: var(--marker-hinge-x);
+  }
+
+  .marker-hinge-y {
+    marker-start: var(--marker-hinge-y);
+  }
+
+  .marker-forceTip {
+    marker-end: var(--marker-force-tip);
+  }
+
+  .marker-dimTip {
+    marker-start: var(--marker-dim-tip);
+    marker-end: var(--marker-dim-tip);
+  }
+
+  .filter-text-label {
+    filter: var(--filter-text-label);
+  }
+}
+</style>

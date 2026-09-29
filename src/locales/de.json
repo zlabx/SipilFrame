@@ -1,0 +1,401 @@
+{
+  "tabView": {
+    "viewer": "Ansicht",
+    "settings": "Einstellungen",
+    "results": "Ergebnisse"
+  },
+  "common": {
+    "label": "Bezeichnung",
+    "node": "Knoten",
+    "element": "Element",
+    "crossSection": "Querschnitt",
+    "material": "Material",
+    "settings": "Einstellungen",
+    "actions": "Aktionen",
+    "coords": "Koordinaten",
+    "type": "Typ",
+    "nodes": "Knoten",
+    "endHinges": "Endgelenke",
+    "massMatrix": "Massenmatrix",
+    "target": "Angriffspunkt",
+    "components": "Komponenten",
+    "loadCase": "Lastfall",
+    "loads": "Lasten",
+    "clearMesh": "Modell löschen",
+    "shareModel": "Modell teilen",
+    "documentation": "Dokumentation",
+    "addUsingDialog": "Per Dialog hinzufügen",
+    "addUsingMouse": "Per Maus hinzufügen",
+    "edit": "Bearbeiten",
+    "copy": "Kopieren",
+    "delete": "Löschen",
+    "stiffnessMatrix": "Steifigkeitsmatrix",
+    "normalForce": "Normalkraft",
+    "shearForce": "Querkraft",
+    "bendingMoment": "Biegemoment",
+    "deformedShape": "Verformte Form",
+    "reactions": "Auflagerreaktionen",
+    "elements": "Elemente",
+    "confirm": "Bestätigen",
+    "saveProject": "Projekt speichern",
+    "openProject": "Projekt öffnen",
+    "lcs": "Lokales Koordinatensystem",
+    "paste": "Einfügen",
+    "addNew": "Neu hinzufügen",
+    "whatisnew": "Was gibt's Neues?",
+    "reverse_orientation": "Bemaßung umkehren"
+  },
+  "nodes": {
+    "addNode": "Knoten hinzufügen",
+    "editNode": "Knoten bearbeiten",
+    "defineSupports": "Knotenlagerung",
+    "lcsAngle": "Knoten-LKS-Winkel"
+  },
+  "elements": {
+    "addElement": "Element hinzufügen",
+    "editElement": "Element bearbeiten",
+    "swapNodeOrder": "Knotenreihenfolge tauschen",
+    "hingeStart": "Gelenk am Anfang",
+    "hingeEnd": "Gelenk am Ende",
+    "hinge": "Gelenk"
+  },
+  "loads": {
+    "addNodalLoad": "Knotenlast hinzufügen",
+    "addElementLoad": "Elementlast hinzufügen",
+    "addLoad": "Last hinzufügen",
+    "nodalLoad": "Knotenlast",
+    "elementLoad": "Elementlast",
+    "prescribedDisplacement": "Vorgegebene Verschiebung",
+    "addPrescribedDisplacement": "Verschiebung vorgeben",
+    "UDL": "Gleichlast",
+    "forceMoment": "Kraft/Moment",
+    "editLoad": "Last bearbeiten",
+    "loadPositionOnBeam": "Lastposition vom Anfangsknoten",
+    "temperatureAxial": "ΔT<sub>b</sub>-ΔT<sub>t</sub> ... Temperaturänderung untere minus obere Faser",
+    "temperatureBending": "ΔT<sub>c</sub> ... Axiale Temperaturänderung",
+    "temperatureDeltaTbt": "ΔT<sub>b</sub>-ΔT<sub>t</sub>",
+    "temperatureDeltaTs": "ΔT<sub>c</sub>",
+    "temperatureDeltaTsNoHTML": "ΔTc",
+    "temperatureDeltaTbtNoHTML": "ΔTb-ΔTt"
+  },
+  "tabs": {
+    "nodes": "Knoten",
+    "elements": "Elemente",
+    "loads": "Lasten",
+    "materials": "Materialien",
+    "crossSections": "Querschnitte",
+    "results": "Ergebnisse"
+  },
+  "crossSection": {
+    "area": "Fläche",
+    "h": "Höhe",
+    "iy": "Iy",
+    "k": "Schubkoeffizient"
+  },
+  "material": {
+    "e": "E",
+    "g": "G",
+    "density": "Dichte",
+    "alphaT": "α_T"
+  },
+  "settings": {
+    "results_scale": "Ergebnisskalierung",
+    "grid_snap_step": "Raster-Schrittweite",
+    "snap_to_grid": "Am Raster ausrichten",
+    "number_format": "Zahlenformat",
+    "number_format_description": "Wie Ergebniswerte geschrieben werden; das Dezimaltrennzeichen folgt der Sprache.",
+    "number_format_auto": "Automatisch",
+    "number_format_scientific": "Wissenschaftlich (1,5 · 10⁴)",
+    "number_format_engineering": "Technisch (15 · 10³)",
+    "language": "Sprache",
+    "language_and_locale": "Sprache & Region",
+    "show_normal_force": "Normalkraft anzeigen",
+    "show_shear_force": "Querkraft anzeigen",
+    "show_bending_moment": "Biegemoment anzeigen",
+    "show_deformed_shape": "Verformte Form anzeigen",
+    "show_loads": "Lasten anzeigen",
+    "units": {
+      "units": "Einheiten",
+      "length": "Länge",
+      "mass": "Masse",
+      "force": "Kraft",
+      "moment": "Biegemoment",
+      "pressure": "Druck",
+      "area": "Fläche",
+      "areaM2": "Flächenträgheitsmoment"
+    },
+    "grid": "Raster",
+    "show_grid": "Raster anzeigen",
+    "mouse": {
+      "mouse": "Maus",
+      "pan_button": "Verschieben mit",
+      "wheel": "Mausrad",
+      "right_button": "Rechte Taste"
+    },
+    "colors": {
+      "colors": "Farben"
+    },
+    "results": {
+      "results": "Ergebnisse"
+    },
+    "viewer_settings": "Anzeigeeinstellungen",
+    "controls_and_shortcuts": "Steuerung & Tastenkürzel",
+    "language_and_locale_subtitle": "Sprache, Region und Einheiteneinstellungen",
+    "viewer_settings_subtitle": "Skalierung, Farben, Raster und mehr",
+    "controls_and_shortcuts_subtitle": "Tastatur- und Mauseinstellungen",
+    "viewer_preview": "Vorschau",
+    "language_description": "Wählen Sie Ihre bevorzugte Sprache für die Benutzeroberfläche.",
+    "units_description": "Wählen Sie Ihre bevorzugten Maßeinheiten.",
+    "reset_settings": "Einstellungen zurücksetzen",
+    "sizes": {
+      "sizes": "Größen",
+      "supportSize": "Lagergröße"
+    },
+    "font_size": "Schriftgröße",
+    "result_label_orientation": "Ausrichtung der Ergebnisbeschriftungen",
+    "result_label_orientation_axis": "Senkrecht zum Diagramm",
+    "result_label_orientation_horizontal": "Immer horizontal"
+  },
+  "sideSettings": {
+    "showDeformedShape": "Verformte Form",
+    "supports": "Lager",
+    "loads": "Lasten",
+    "nodeLabels": "Knotenbeschriftung",
+    "elementLabels": "Elementbeschriftung",
+    "more_settings": "Weitere Einstellungen",
+    "showReactions": "Auflagerreaktionen"
+  },
+  "dofs": {
+    "bcs": "Gelagerte Freiheitsgrade"
+  },
+  "results": {
+    "results": "Ergebnisse",
+    "nodal_results": "Knotenergebnisse",
+    "element_results": "Elementergebnisse",
+    "end_forces": "Endkräfte (im lokalen Koordinatensystem)"
+  },
+  "materials": {
+    "addMaterial": "Material hinzufügen",
+    "material_library": "Materialbibliothek",
+    "section_library": "Querschnittsbibliothek"
+  },
+  "crossSections": {
+    "addCrossSection": "Querschnitt hinzufügen"
+  },
+  "dialogs": {
+    "addNode": {
+      "addNewNode": "Neuen Knoten hinzufügen",
+      "coordinate_x": "X-Koordinate",
+      "coordinate_z": "Z-Koordinate",
+      "addNode": "Knoten hinzufügen"
+    },
+    "common": {
+      "cancel": "Abbrechen",
+      "orChooseFromLibrary": "Oder aus der Bibliothek auswählen"
+    },
+    "addElement": {
+      "fromNodeId": "Anfangsknoten",
+      "toNodeId": "Endknoten",
+      "addElement": "Element hinzufügen",
+      "addNewElement": "Neues Element hinzufügen",
+      "material": "Material",
+      "crossSection": "Querschnitt"
+    },
+    "addNodalLoad": {
+      "addNewNodalLoad": "Neue Knotenlast hinzufügen",
+      "addNodalLoad": "Knotenlast hinzufügen"
+    },
+    "addElementLoad": {
+      "addNewElementLoad": "Neue Elementlast hinzufügen",
+      "addElementLoad": "Elementlast hinzufügen"
+    },
+    "addMaterial": {
+      "addNewMaterial": "Neues Material hinzufügen",
+      "addMaterial": "Material hinzufügen",
+      "E": "E - Elastizitätsmodul",
+      "G": "G - Schubmodul",
+      "density": "ρ - Dichte",
+      "alphaT": "α - Wärmeausdehnungskoeffizient"
+    },
+    "addCrossSection": {
+      "addNewCrossSection": "Neuen Querschnitt hinzufügen",
+      "addCrossSection": "Querschnitt hinzufügen"
+    },
+    "editNodalLoad": {
+      "editNodalLoad": "Knotenlast bearbeiten"
+    },
+    "editElementLoad": {
+      "editElementLoad": "Elementlast bearbeiten"
+    },
+    "update": {
+      "title": "Update verfügbar",
+      "update": "Aktualisieren",
+      "text1": "Wir stellen ein Update bereit, für das die App zurückgesetzt werden muss. Dabei geht Ihr aktueller Fortschritt verloren.",
+      "text2": "Wenn Sie den aktuellen Stand behalten möchten, können Sie das Update abbrechen."
+    },
+    "editNode": {
+      "editNode": "Knoten bearbeiten"
+    },
+    "changelog": {
+      "title": "Was gibt's Neues?",
+      "description": "Neue Funktionen, Verbesserungen und Einblicke in das, woran wir gerade arbeiten.",
+      "contributors": "Mitwirkende an dieser Version: {names}"
+    }
+  },
+  "tooltip": {
+    "materials": {},
+    "material": {
+      "alphaT": "Der Wärmeausdehnungskoeffizient beschreibt, wie sich die Größe eines Körpers bei Temperaturänderung verändert.",
+      "e": "Das Elastizitätsmodul beschreibt die Steifigkeit eines Materials bei Zug- und Druckbeanspruchung.",
+      "g": "Das Schubmodul ist eine Materialkennzahl für den Widerstand gegen Verformung unter Schubspannung.",
+      "density": "Die Dichte beschreibt, wie viel Masse in einem bestimmten Volumen eines Stoffes enthalten ist."
+    }
+  },
+  "footer": {
+    "reportIssue": "Problem melden",
+    "requestFeature": "Funktion vorschlagen",
+    "released": "veröffentlicht"
+  },
+  "sharing": {
+    "shareViaURL": "Modell per URL teilen",
+    "instructions": "Klicken Sie in das Feld, um den Link zu kopieren, und senden Sie ihn anschließend an Ihre Mitwirkenden.",
+    "copyCue": "Link kopieren",
+    "openLink": "Link öffnen",
+    "nativeShare": "Über Systemdialog teilen",
+    "linkCopied": "Link in die Zwischenablage kopiert",
+    "copyFailed": "Automatisches Kopieren war nicht möglich. Bitte verwenden Sie Ihre Tastenkürzel."
+  },
+  "tour": {
+    "startTour": "Tour starten",
+    "skipTour": "Vorerst überspringen",
+    "viewerControls": {
+      "title": "Viewer-Schaltflächen",
+      "description": "Mit den Viewer-Steuerelementen können Sie die Struktur zentrieren, an den Bildschirm anpassen und auswählen, was angezeigt wird."
+    },
+    "viewerSettings": {
+      "title": "Anzeigeoptionen anpassen",
+      "description": "Wählen Sie, was angezeigt werden soll – Normalkraft, Querkraft, Biegemoment, verformte Form oder alles zusammen."
+    },
+    "bottomBar": {
+      "title": "Entitäten hinzufügen, entfernen und bearbeiten",
+      "description": "Der zentrale Bereich, in dem Sie jeden Aspekt Ihrer Struktur bearbeiten können – von Knoten und Elementen bis zu Lasten, Materialien und Querschnitten."
+    },
+    "previousButton": "Zurück",
+    "nextButton": "Weiter",
+    "finishButton": "Fertig"
+  },
+  "welcome": {
+    "title": "Willkommen bei <span class=\"edubeam\">edubeam</span>! 🚀",
+    "description": "Damit Sie schnell starten können, haben wir eine kurze Einführungstour vorbereitet, die Sie durch die wichtigsten Funktionen unseres Programms führt."
+  },
+  "confirmation": {
+    "clearMesh": {
+      "message": "Möchten Sie das Modell wirklich löschen? Diese Aktion kann nicht rückgängig gemacht werden.",
+      "title": "Modell löschen?",
+      "materials": "Materialien löschen",
+      "crossSections": "Querschnitte löschen"
+    },
+    "resetSettings": {
+      "title": "Einstellungen zurücksetzen?",
+      "message": "Möchten Sie wirklich alle Einstellungen auf die Standardwerte zurücksetzen? Diese Aktion kann nicht rückgängig gemacht werden."
+    },
+    "splitElementAndPlaceNode": {
+      "title": "Knotenplatzierung bestätigen",
+      "message": "<p>Es scheint, dass Sie einen Knoten auf dem Träger {label} platzieren.</p><p class=\"mt-3\">Möchten Sie das Element teilen und den Knoten verbinden oder den Knoten unverbunden in der Struktur platzieren?</p>",
+      "split": "Mit Struktur verbinden"
+    },
+    "placeIndividualNode": "Einzelnen Knoten platzieren"
+  },
+  "selection": {
+    "node": "Knoten",
+    "element": "Element",
+    "dimension": "Bemaßungslinie",
+    "nodal-load": "Knotenlast",
+    "element-load": "Elementlast",
+    "prescribedbc-load": "Vorgegebene Verschiebung"
+  },
+  "validators": {
+    "enterValue": "Wert eingeben",
+    "invalidNumber": "Ungültige Zahl"
+  },
+  "loadType": {
+    "loadType": "Lasttyp",
+    "concentrated": "Einzellast",
+    "trapezoidal": "Trapezlast",
+    "udl": "Gleichmäßig verteilte Last",
+    "temperature": "Temperaturlast"
+  },
+  "dimensioning": {
+    "add_dimension": "Bemaßung hinzufügen",
+    "add_along_element": "Element {label} bemaßen"
+  },
+  "warnings": {
+    "noMaterialsDefined": "Keine Materialien definiert.",
+    "noCrossSectionsDefined": "Keine Querschnitte definiert."
+  },
+  "help": {
+    "aria": "Hilfe anzeigen",
+    "readMore": "Mehr in der Dokumentation",
+    "troubleshooting": "Fehlerbehebung",
+    "nodes": {
+      "title": "Knoten",
+      "body": "Knoten halten die Struktur zusammen. Koordinaten, Lager, Gelenke und die dort angreifenden Lasten werden je Knoten festgelegt."
+    },
+    "supports": {
+      "title": "Lager",
+      "body": "Ein angehakter Freiheitsgrad wird festgehalten: Dx und Dz sperren die Verschiebung, Ry die Verdrehung. Eine Struktur braucht mindestens drei unabhängige Bindungen."
+    },
+    "elements": {
+      "title": "Elemente",
+      "body": "Elemente verbinden zwei Knoten und tragen ein Material und einen Querschnitt. Ein freigegebenes Ende macht aus dem Balken einen Gelenk- oder Fachwerkstab."
+    },
+    "loads": {
+      "title": "Lasten",
+      "body": "Lasten wirken in Knoten oder entlang der Elemente. Positive Werte folgen den globalen Achsen, wobei z nach unten zeigt."
+    },
+    "nodalLoads": {
+      "title": "Knotenlasten",
+      "body": "Eine Knotenlast bringt eine Kraft oder ein Moment direkt im Knoten auf. Mit vorgeschriebenen Verschiebungen lässt sich stattdessen eine Lagersenkung aufbringen."
+    },
+    "elementLoads": {
+      "title": "Elementlasten",
+      "body": "Elementlasten wirken entlang des Stabes: gleichmäßig, trapezförmig, konzentriert oder als Temperatur. Sie können in globalen oder lokalen Achsen angegeben werden."
+    },
+    "materials": {
+      "title": "Materialien",
+      "body": "Ein Material trägt Elastizitätsmodul, Schubmodul, Dichte und Wärmeausdehnung. Für eine reine statische Berechnung zählen nur E und der Querschnitt."
+    },
+    "crossSections": {
+      "title": "Querschnitte",
+      "body": "Der Querschnitt liefert Fläche und Flächenträgheitsmoment für die Steifigkeit. Wähle einen aus der Bibliothek oder zeichne ein eigenes Polygon."
+    },
+    "hinges": {
+      "title": "Endgelenke",
+      "body": "Ein Haken gibt das Biegemoment an diesem Elementende frei. Beide Enden ergeben einen Fachwerkstab, ein Ende ein Gelenk im Rahmen."
+    },
+    "signConvention": {
+      "title": "Vorzeichenkonvention",
+      "body": "Die globale z-Achse zeigt nach unten, ein positives Fz oder fz wirkt also nach unten; My ist gegen den Uhrzeigersinn positiv. Lasten im lokalen System folgen dem Element."
+    },
+    "results": {
+      "title": "Ergebnisse",
+      "body": "Nach der Berechnung gibt es Normalkraft, Querkraft, Biegemoment, verformte Figur und Auflagerkräfte – als Diagramme und als Tabellen."
+    },
+    "diagrams": {
+      "title": "Ergebnisdarstellung",
+      "body": "Diese Schalter zeichnen Normalkraft, Querkraft, Biegemoment, verformte Figur und Auflagerkräfte über dem Modell. N ist im Zug positiv, My bei Zug an der Unterseite."
+    },
+    "endForces": {
+      "title": "Endkräfte",
+      "body": "X12, Z12 und M12 wirken im Anfangsknoten, X21, Z21 und M21 im Endknoten – stets im lokalen System des Elements, das vom Anfangs- zum Endknoten verläuft."
+    },
+    "settings": {
+      "title": "Einheiten & Einstellungen",
+      "body": "Sprache, Einheiten, Maßstab der Ansicht, Farben und Tastenkürzel sind hier. Einheiten rechnen die Werte nur um, das Modell ändern sie nicht."
+    },
+    "sharing": {
+      "title": "Speichern & Teilen",
+      "body": "Speichere das Modell als Datei, kopiere einen Link, der die ganze Struktur enthält, oder binde eine schreibgeschützte Ansicht in eine eigene Seite ein."
+    }
+  }
+}

@@ -1,0 +1,3417 @@
+<script setup lang="ts">
+import { closeModal, openModal } from 'jenesius-vue-modal';
+import SvgPanZoom from './SVGPanZoom.vue';
+import SvgGrid from './SVGGrid.vue';
+import SvgViewerDefs from './SVGViewerDefs.vue';
+import { useProjectStore } from '../store/project';
+import { ref, onMounted, computed, nextTick, watch, reactive, onUnmounted, provide } from 'vue';
+import { useViewerStore } from '../store/viewer';
+import { useAppStore } from '@/store/app';
+
+import AddElementDialog from './dialogs/AddElement.vue';
+import AddNodeDialog from './dialogs/AddNode.vue';
+import AddMaterialDialog from './dialogs/AddMaterial.vue';
+import AddCrossSectionDialog from './dialogs/AddCrossSection.vue';
+import SolveDiagnosticsDialog from './dialogs/SolveDiagnostics.vue';
+import HelpTip from './HelpTip.vue';
+import Confirmation from './dialogs/Confirmation.vue';
+
+import EditNodalLoadDialog from './dialogs/EditNodalLoad.vue';
+import EditElementLoadDialog from './dialogs/EditElementLoad.vue';
+
+import SVGElementLoad from './svg/ElementLoad.vue';
+import SVGElementConcentratedLoad from './svg/ElementConcentratedLoad.vue';
+import SVGNodalLoad from './svg/NodalLoad.vue';
+import SVGPrescribedDisplacement from './svg/PrescribedDisplacement.vue';
+import SVGNode from './svg/Node.vue';
+import SVGElement from './svg/Element.vue';
+import SVGElementTemperatureLoad from './svg/ElementTemperatureLoad.vue';
+import SVGDimensioning from './svg/Dimensioning.vue';
+import SelectionBox from './SelectionBox.vue';
+import WindowPickRect from './WindowPickRect.vue';
+import { windowDragKey, windowPickBox, type WindowDrag } from '@/types/windowPick';
+import HoveredElement from './HoveredElement.vue';
+import { intersectedKey } from '@/types/hover';
+import PlacingPreview from './PlacingPreview.vue';
+import { placingKey } from '@/types/placing';
+
+import {
+  applyNodeLcsAngle,
+  checkNumber,
+  executeModelMutationWithUndo,
+  loadType,
+  parseFloat2,
+  redoModelChange,
+  throttle,
+  undoModelChange,
+} from '../utils';
+import { createDimensionId, ensureDimensionId } from '@/utils/id';
+import { selectionSubtitle } from '@/utils/selectionDetails';
+import { boundsFromPoints } from '@/utils/fitBounds';
+import { placePopupNearAnchor, type AnchorRect } from '@/utils/popupPlacement';
+import { deviceCanTouch, deviceHasHover } from '@/utils/pointer';
+import {
+  Node,
+  DofID,
+  Beam2D,
+  BeamElementLoad,
+  NodalLoad,
+  PrescribedDisplacement,
+  BeamElementTrapezoidalEdgeLoad,
+  BeamElementUniformEdgeLoad,
+  BeamTemperatureLoad,
+} from 'ts-fem';
+import { useMagicKeys } from '@vueuse/core';
+
+import { useI18n } from 'vue-i18n';
+const { t } = useI18n();
+
+import ContextMenuElement from './ContextMenuElement.vue';
+import ContextMenuNode from './ContextMenuNode.vue';
+import ContextMenuElementLoad from './ContextMenuElementLoad.vue';
+import ContextMenuNodalLoad from './ContextMenuNodalLoad.vue';
+import ContextMenuDimension from './ContextMenuDimension.vue';
+
+import { MouseMode } from '@/mouse';
+import { formatMeasureAsHTML } from '../SVGUtils';
+
+import Selection from './Selection.vue';
+
+import { useLayoutStore } from '@/store/layout';
+import { EventType, eventBus } from '../EventBus';
+import { BeamConcentratedLoad } from 'ts-fem';
+import { useClipboardStore } from '../store/clipboard';
+import {
+  createDimensionPoint,
+  createDimensionPointFromNode,
+  createDimensionRenderableNode,
+  resolveDimensionPoints,
+  type DimensionLine,
+  type DimensionPoint,
+} from '@/types/dimension';
+
+const props = defineProps<{
+  id: string;
+  resultLabelMode?: 'axis' | 'horizontal';
+}>();
+
+let mouseStartX = 0;
+let mouseStartY = 0;
+/** Pointers currently down on the canvas; more than one means a pinch or a two finger pan. */
+const activePointers = new Set<number>();
+/** A touch is down in a placing mode, and still qualifies as a tap. */
+let pendingTap = false;
+const mouseXReal = ref(0);
+const mouseYReal = ref(0);
+
+const startNode = ref<{
+  label: string | number | null;
+  x: number;
+  y: number;
+  sourceNodeLabel?: string | number | null;
+} | null>(null);
+const deltaPaste = ref<{ x: number; y: number } | null>({ x: 0, y: 0 });
+const dimlineDist = ref(48); // preview offset
+
+const appStore = useAppStore();
+const projectStore = useProjectStore();
+const viewerStore = useViewerStore();
+const layoutStore = useLayoutStore();
+
+const resolvedResultLabelMode = computed(() => props.resultLabelMode ?? viewerStore.resultLabelMode);
+
+const panZoom = ref<InstanceType<typeof SvgPanZoom> | null>(null);
+const grid = ref<InstanceType<typeof SvgGrid> | null>(null);
+
+const svg = ref<SVGSVGElement>();
+const viewport = ref<SVGGElement>();
+const tooltip = ref<Element>();
+
+const scale = computed(() => {
+  if (panZoom.value) return panZoom.value.scale;
+
+  return 1;
+});
+
+provide('viewer_uuid', props.id);
+
+const previewDimensionDistance = computed(() => {
+  const currentScale = scale.value || 1;
+  const pxOffset = dimlineDist.value;
+  return pxOffset / currentScale;
+});
+
+const DIMENSION_POINT_SNAP_RADIUS_PX = 12;
+
+const getNearestDimensionSnapNode = () => {
+  const snapRadius = DIMENSION_POINT_SNAP_RADIUS_PX / (scale.value || 1);
+  let nearestNode: Node | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+
+  for (const node of projectStore.nodes) {
+    const distance = Math.hypot(node.coords[0] - mouseXReal.value, node.coords[2] - mouseYReal.value);
+    if (distance > snapRadius || distance >= nearestDistance) continue;
+
+    nearestNode = node;
+    nearestDistance = distance;
+  }
+
+  return nearestNode;
+};
+
+const getPointerDimensionPoint = (): DimensionPoint => {
+  const snappedNode = getNearestDimensionSnapNode();
+  if (snappedNode) return createDimensionPointFromNode(snappedNode);
+
+  return createDimensionPoint(mouseXReal.value, mouseYReal.value);
+};
+
+const previewDimensionPoints = computed(() => {
+  if (appStore.mouseMode !== MouseMode.ADD_DIMLINE || !startNode.value) return null;
+
+  const previewEnd = getPointerDimensionPoint();
+
+  return [
+    createDimensionRenderableNode({ x: startNode.value.x, y: startNode.value.y }, startNode.value.sourceNodeLabel),
+    createDimensionRenderableNode(previewEnd, previewEnd.sourceNodeLabel),
+  ];
+});
+
+const intersected = ref<{
+  type: string | null;
+  index: number | string | null;
+  originalPosition: { x: number; y: number };
+}>({
+  type: null,
+  index: null,
+  originalPosition: { x: 0, y: 0 },
+});
+
+// The highlight reads it; the drawing only writes it. See HoveredElement.vue.
+provide(intersectedKey, intersected);
+
+/**
+ * What the placing preview draws, handed over as the refs themselves so that the drawing writes
+ * the pointer position without reading it. See PlacingPreview.vue.
+ */
+provide(placingKey, {
+  x: mouseXReal,
+  y: mouseYReal,
+  startNode,
+  snappedToNode: computed(() => intersected.value.type === 'node'),
+});
+
+const pasteLayer = ref<SVGGElement | null>(null);
+
+/**
+ * The clipboard preview is carried under the pointer by its own transform rather than a bound
+ * one: what it holds does not depend on the pointer, and binding it in the drawing rebuilt the
+ * whole scene on every report of the gesture.
+ */
+watch(
+  [mouseXReal, mouseYReal, startNode, deltaPaste, () => appStore.mouseMode],
+  ([x, y, start, delta]) => {
+    if (!pasteLayer.value || !start || !delta) return;
+
+    pasteLayer.value.setAttribute('transform', `translate(${x - start.x + delta.x}, ${y - start.y + delta.y})`);
+  },
+  // After the paste layer is in the document, so entering the mode places it before it is seen.
+  { flush: 'post', immediate: true }
+);
+
+const geometryLayer = ref<SVGGElement | null>(null);
+const resultsLayer = ref<SVGGElement | null>(null);
+
+/**
+ * Hovering an element dims the rest of the drawing behind the highlighted copy. Set on the layers
+ * rather than bound in the template: reading the hover while rendering rebuilds every node,
+ * element and load each time the pointer moves onto or off something.
+ */
+watch(
+  () => intersected.value.type === 'element',
+  (dim) => {
+    for (const layer of [geometryLayer.value, resultsLayer.value]) layer?.classList.toggle('dimmed', dim);
+  }
+);
+
+/**
+ * Writes the tooltip only when what it says has changed. A pointer reports many times per frame
+ * while it rests on the same element, and rebuilding the markup on every report throws away the
+ * nodes and parses them again for nothing.
+ */
+let shownTooltip = '';
+
+const writeTooltip = (content: HTMLElement, html: string) => {
+  if (html === shownTooltip) return;
+
+  shownTooltip = html;
+  content.innerHTML = html;
+};
+
+const hideTooltip = (clearHoverState = true) => {
+  const tt = tooltip.value as HTMLElement | undefined;
+  if (!tt) return;
+
+  tt.style.display = 'none';
+  document.body.style.cursor = 'auto';
+  shownTooltip = '';
+
+  if (!clearHoverState) return;
+
+  if (
+    [MouseMode.HOVER, MouseMode.SELECTING, MouseMode.ADD_ELEMENT, MouseMode.ADD_DIMLINE].includes(appStore.mouseMode)
+  ) {
+    if (appStore.mouseMode === MouseMode.HOVER) appStore.mouseMode = MouseMode.NONE;
+
+    intersected.value.type = null;
+    intersected.value.index = null;
+  }
+};
+
+const zoom = (e: KeyboardEvent) => {
+  if (e.ctrlKey && e.code === 'Equal') {
+    panZoom.value?.zoom(svg.value.clientWidth / 2, svg.value.clientHeight / 2, -0.1);
+    e.preventDefault();
+  }
+
+  if (e.ctrlKey && e.code === 'Minus') {
+    panZoom.value?.zoom(svg.value.clientWidth / 2, svg.value.clientHeight / 2, 0.1);
+    e.preventDefault();
+  }
+};
+
+const resetAndFit = () => {
+  fitContent();
+};
+
+/** Answers EventType.REQUEST_VIEWER_SVG so exports can reach the element we own. */
+const provideSvgForExport = (respond: (svg: SVGSVGElement | null) => void) => {
+  respond((svg.value as SVGSVGElement) ?? null);
+};
+
+onMounted(() => {
+  window.addEventListener('keydown', zoom);
+  eventBus.on(EventType.FIT_CONTENT, resetAndFit);
+  eventBus.on(EventType.REQUEST_VIEWER_SVG, provideSvgForExport);
+});
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', zoom);
+  eventBus.off(EventType.FIT_CONTENT, resetAndFit);
+  eventBus.off(EventType.REQUEST_VIEWER_SVG, provideSvgForExport);
+});
+
+onMounted(() => {
+  window.setTimeout(() => {
+    //fitContent();
+  }, 100);
+});
+
+const setUnsolved = () => {
+  useProjectStore().solver.loadCases[0].solved = false;
+};
+
+const solve = () => {
+  nextTick(() => {
+    useProjectStore().solve();
+  });
+};
+
+const hasSolveDiagnosticsIssues = computed(
+  () => projectStore.solveDiagnostics.errors.length > 0 || projectStore.solveDiagnostics.warnings.length > 0
+);
+
+const hasBlockingSolveIssues = computed(() => projectStore.solveDiagnostics.errors.length > 0);
+
+const solveDiagnosticsSummary = computed(() => {
+  const errors = projectStore.solveDiagnostics.errors.length;
+  const warnings = projectStore.solveDiagnostics.warnings.length;
+
+  if (errors > 0 && warnings > 0) {
+    return `Model has ${errors} error(s) and ${warnings} warning(s).`;
+  }
+
+  if (errors > 0) {
+    return `Model has ${errors} error(s).`;
+  }
+
+  return `Model has ${warnings} warning(s).`;
+});
+
+const openSolveDiagnostics = () => {
+  if (!hasSolveDiagnosticsIssues.value) return;
+
+  openModal(SolveDiagnosticsDialog, {
+    diagnostics: projectStore.solveDiagnostics,
+    blocked: hasBlockingSolveIssues.value,
+  });
+};
+
+const centerContent = () => {
+  if (!panZoom.value) return;
+
+  panZoom.value.centerContent();
+
+  if (grid.value) grid.value.refreshGrid(true);
+};
+
+const fitContent = async () => {
+  if (!panZoom.value) return;
+
+  await panZoom.value.fitContent();
+
+  if (grid.value) grid.value.refreshGrid(true);
+};
+
+/** Distributed load arrows are drawn 60 px long (see ElementLoad/UDL.vue). */
+const LOAD_DECORATION_PX = 60;
+
+/**
+ * Space kept around the structure for everything that can be switched on: result
+ * diagrams, reactions and loads plus one line of labels. Reserving it whether or
+ * not they are shown keeps the fitted view identical across display settings.
+ */
+const fitReserve = computed(() => Math.max(viewerStore.resultsScalePx_, LOAD_DECORATION_PX) + viewerStore.fontSize + 8);
+
+const modelBounds = () => boundsFromPoints(projectStore.nodes.map((node) => [node.coords[0], node.coords[2]] as const));
+
+/**
+ * Screen to model, held for the frame it was measured in.
+ *
+ * Reading the matrix flushes the layout of the whole drawing, and a pointer reports many times
+ * per frame - moving over an element was paying for that on every report. Nothing can move the
+ * view within a frame, so the matrix is measured once and dropped at the end of it.
+ */
+let pointerMatrix: DOMMatrix | null = null;
+
+const invalidatePointerMatrix = () => {
+  pointerMatrix = null;
+};
+
+const screenToModelMatrix = (): DOMMatrix => {
+  if (!pointerMatrix) {
+    pointerMatrix = (viewport.value!.getScreenCTM() as DOMMatrix).inverse();
+    requestAnimationFrame(invalidatePointerMatrix);
+  }
+
+  return pointerMatrix;
+};
+
+const onUpdate = throttle((zooming: boolean) => {
+  invalidatePointerMatrix();
+  if (zooming) hideTooltip();
+  if (grid.value) grid.value.refreshGrid(zooming);
+}, 1000 / 10);
+
+const toggleGridVisibility = () => {
+  viewerStore.showGrid = !viewerStore.showGrid;
+  nextTick(() => grid.value?.refreshGrid(true));
+};
+
+const toggleSnapToGrid = () => {
+  viewerStore.snapToGrid = !viewerStore.snapToGrid;
+  nextTick(() => grid.value?.refreshGrid(true));
+};
+
+const isShortcutBlocked = () => {
+  const activeElement = document.activeElement as HTMLElement | null;
+  if (!activeElement) return false;
+  if (activeElement === document.body) return false;
+
+  return activeElement.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(activeElement.tagName);
+};
+
+const { current, escape, f, c, g, s, _delete } = useMagicKeys({
+  aliasMap: {
+    _delete: 'delete',
+  },
+});
+
+const { ctrl_a, ctrl_c, ctrl_v } = useMagicKeys({
+  passive: false,
+  onEventFired(e) {
+    if (isShortcutBlocked()) return;
+    if (e.ctrlKey && e.key === 'a' && e.type === 'keydown') e.preventDefault();
+  },
+});
+
+watch(f, (v) => {
+  if (isShortcutBlocked()) return;
+  if (v) fitContent();
+});
+
+watch(c, (v) => {
+  if (isShortcutBlocked()) return;
+  if (v && !current.has('control')) centerContent();
+});
+
+watch(g, (v) => {
+  if (!v || isShortcutBlocked()) return;
+  toggleGridVisibility();
+});
+
+watch(s, (v) => {
+  if (!v || isShortcutBlocked()) return;
+  toggleSnapToGrid();
+});
+
+watch(_delete, (v) => {
+  if (isShortcutBlocked()) return;
+  if (v) {
+    projectStore.deleteSelection2();
+    solve();
+  }
+});
+
+watch(ctrl_a, (v) => {
+  if (isShortcutBlocked()) return;
+  if (v) {
+    projectStore.selectAll2();
+  }
+});
+
+watch(ctrl_c, (v) => {
+  if (isShortcutBlocked()) return;
+  if (v) {
+    useClipboardStore().select(projectStore.selection2);
+  }
+});
+
+watch(ctrl_v, (v) => {
+  if (isShortcutBlocked()) return;
+  if (v) {
+    paste();
+  }
+});
+
+/** Leaves whatever mode the canvas is in - what Esc does, and what the mode banner button calls. */
+const cancelActiveMode = () => {
+  if (appStore.mouseMode === MouseMode.PICK_WINDOW) finishWindowPick(null);
+  cancelDimensionDrag();
+  cancelDimensionPointDrag();
+  if ('activeElement' in document) (document.activeElement as HTMLElement).blur();
+  appStore.mouseMode = MouseMode.NONE;
+  projectStore.clearSelection();
+  projectStore.clearSelection2();
+  startNode.value = null;
+};
+
+/** Supports given to every node placed by the add node mode; kept across placements. */
+const addNodeBcs = ref<DofID[]>([]);
+/** Local system angle given to every node placed by the add node mode, in degrees. */
+const addNodeAngle = ref('0');
+
+/** Places a node at the pointer with whatever the add node banner currently has set. */
+const placeNode = (label: number | string) => {
+  const node = projectStore.solver.domain.createNode(
+    label,
+    [mouseXReal.value, 0, mouseYReal.value],
+    [...addNodeBcs.value]
+  );
+
+  applyNodeLcsAngle(node, parseFloat2(addNodeAngle.value));
+
+  return node;
+};
+
+/** End hinges given to every element placed by the add element mode. */
+const addElementHinges = ref([false, false]);
+
+/**
+ * A mode where clicking the canvas places something. There is no cursor and no Esc key on touch,
+ * so the mode has to be both visible and cancellable on screen.
+ */
+const activeAddMode = computed(() => {
+  if (appStore.mouseMode === MouseMode.ADD_NODE) return { icon: 'mdi-vector-point-plus', label: t('nodes.addNode') };
+
+  if (appStore.mouseMode === MouseMode.ADD_ELEMENT) {
+    return { icon: 'mdi-vector-polyline-plus', label: t('elements.addElement') };
+  }
+
+  if (appStore.mouseMode === MouseMode.ADD_DIMLINE) {
+    return { icon: 'mdi-arrow-expand-horizontal', label: t('dimensioning.add_dimension') };
+  }
+
+  if (appStore.mouseMode === MouseMode.PASTE_CLIPBOARD) return { icon: 'mdi-content-paste', label: t('common.paste') };
+
+  if (appStore.mouseMode === MouseMode.PICK_WINDOW) {
+    return { icon: 'mdi-select-drag', label: t('exportImage.pickWindowHint') };
+  }
+
+  return null;
+});
+
+/* ---- window pick: the export dialog asks for a rectangle of the drawing ---- */
+
+/** Where the pointer is in model units, unsnapped. */
+const screenToModel = (e: PointerEvent) => {
+  const point = svg.value!.createSVGPoint();
+
+  point.x = e.clientX;
+  point.y = e.clientY;
+
+  const p = point.matrixTransform(screenToModelMatrix());
+
+  return { x: p.x, y: p.y };
+};
+
+const windowDrag = ref<WindowDrag>(null);
+
+// The overlay reads it; the drawing only writes it. See WindowPickRect.vue.
+provide(windowDragKey, windowDrag);
+
+const finishWindowPick = (box: { x: number; y: number; w: number; h: number } | null) => {
+  windowDrag.value = null;
+  appStore.mouseMode = MouseMode.NONE;
+  viewerStore.finishWindowPick(box);
+};
+
+watch(escape, (v) => {
+  if (v) {
+    cancelActiveMode();
+
+    //viewerStore.settingsOpen = false;
+  }
+});
+
+const refreshTooltipContent = () => {
+  const tt = tooltip.value as HTMLElement | undefined;
+  if (!tt || tt.style.display === 'none') return;
+
+  if (intersected.value.type === 'node' && intersected.value.index !== null) {
+    const node = projectStore.solver.domain.nodes.get(String(intersected.value.index));
+    if (!node) return;
+
+    const tooltipContent = tt.querySelector('.content') as HTMLElement | null;
+    if (!tooltipContent) return;
+
+    writeTooltip(tooltipContent, renderDetails(buildNodeDetails(node as Node)));
+  }
+};
+
+watch(
+  () => projectStore.solver.loadCases[0].solved,
+  (solved) => {
+    if (solved) refreshTooltipContent();
+  }
+);
+
+const paste = () => {
+  const midpoint = useClipboardStore().midpoint();
+  deltaPaste.value = {
+    x: mouseXReal.value - midpoint[0],
+    y: mouseYReal.value - midpoint[2],
+  };
+
+  startNode.value = { label: 'null', x: mouseXReal.value, y: mouseYReal.value };
+  appStore.mouseMode = MouseMode.PASTE_CLIPBOARD;
+};
+
+/** Labels come from share links / imported files, so never interpolate them into HTML unescaped. */
+const escapeHtml = (value: unknown) =>
+  String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+/**
+ * What is known about one entity: a heading naming it, and a body of rows. The hover tooltip shows
+ * both; the selection panel names its selection in its own header, so it shows the body.
+ */
+type EntityDetails = { title: string; body: string };
+
+const renderDetails = (details: EntityDetails) =>
+  `<strong>${details.title}</strong>${details.body ? `<br>${details.body}` : ''}`;
+
+/**
+ * The pointer kind behind the current gesture. The compatibility mouse events a tap fires carry no
+ * pointer type of their own, so the last one seen on the canvas answers for them.
+ */
+let lastPointerType = 'mouse';
+
+/**
+ * Touch and pen have no hover. Acting on the compatibility mouse events a tap fires would leave a
+ * tooltip under the finger with nothing left to dismiss it, and the item hover latched, so that
+ * the next drag would move it instead of panning. A tap opens the selection panel, which carries
+ * the same content, instead.
+ */
+const isMousePointer = (e: MouseEvent | PointerEvent) =>
+  ('pointerType' in e ? (e as PointerEvent).pointerType : lastPointerType) === 'mouse';
+
+const showEntityTooltip = (e: MouseEvent, details: EntityDetails) => {
+  const tt = tooltip.value as HTMLElement;
+  const tooltipContent = tt.querySelector('.content') as HTMLElement;
+
+  tt.style.top = e.offsetY + 'px';
+  tt.style.left = e.offsetX + 'px';
+  writeTooltip(tooltipContent, renderDetails(details));
+  tt.style.display = 'block';
+  document.body.style.cursor = 'pointer';
+};
+
+const buildElementDetails = (el: Beam2D): EntityDetails => ({
+  title: `${t('common.element')} ${escapeHtml(el.label)}`,
+  body: `CS=${escapeHtml(el.cs)}, Mat=${escapeHtml(el.mat)}`,
+});
+
+const buildElementLoadDetails = (el: BeamElementLoad): EntityDetails => {
+  let lt = 'loadType.udl';
+  const isDistributed = el instanceof BeamElementUniformEdgeLoad || el instanceof BeamElementTrapezoidalEdgeLoad;
+  if (el instanceof BeamElementTrapezoidalEdgeLoad) lt = 'loadType.trapezoidal';
+  else if (el instanceof BeamConcentratedLoad) lt = 'loadType.concentrated';
+  else if (el instanceof BeamTemperatureLoad) lt = 'loadType.temperature';
+  const ff = isDistributed ? 'f' : 'F';
+  // A distributed load is an intensity, a concentrated one a force; both parts of the unit count.
+  const convertIntensity = isDistributed ? appStore.convertForceDistance : appStore.convertForce;
+  let uu = isDistributed ? appStore.units.ForceDistance : appStore.units.Force;
+  if (el instanceof BeamTemperatureLoad) uu = appStore.units.Temperature;
+
+  const rows: string[] = [];
+
+  if (el instanceof BeamTemperatureLoad) {
+    if (Math.abs(el.values[0]) > 1e-32) {
+      rows.push(`${t('loads.temperatureDeltaTs')} = ${appStore.convertTemperature(el.values[0])} ${uu}`);
+    }
+
+    if (Math.abs(el.values[1]) > 1e-32) {
+      rows.push(`${t('loads.temperatureDeltaTbt')} = ${appStore.convertTemperature(el.values[1])} ${uu}`);
+    }
+  } else if (el instanceof BeamElementTrapezoidalEdgeLoad) {
+    if (Math.abs(el.startValues[0]) > 1e-32 || Math.abs(el.endValues[0]) > 1e-32) {
+      rows.push(
+        `${ff}<sub>x</sub> = ${convertIntensity(el.startValues[0])} → ${convertIntensity(el.endValues[0])} ${uu}`
+      );
+    }
+
+    if (Math.abs(el.startValues[1]) > 1e-32 || Math.abs(el.endValues[1]) > 1e-32) {
+      rows.push(
+        `${ff}<sub>z</sub> = ${convertIntensity(el.startValues[1])} → ${convertIntensity(el.endValues[1])} ${uu}`
+      );
+    }
+  } else if (el instanceof BeamElementUniformEdgeLoad || el instanceof BeamConcentratedLoad) {
+    if (Math.abs(el.values[0]) > 1e-32) rows.push(`${ff}<sub>x</sub> = ${convertIntensity(el.values[0])} ${uu}`);
+
+    if (Math.abs(el.values[1]) > 1e-32) rows.push(`${ff}<sub>z</sub> = ${convertIntensity(el.values[1])} ${uu}`);
+  }
+
+  return { title: t(lt), body: rows.join('<br>') };
+};
+
+const buildNodalLoadDetails = (el: NodalLoad): EntityDetails => {
+  const rows: string[] = [];
+
+  if (Math.abs(el.values[0]) > 1e-32) {
+    rows.push(`F<sub>x</sub> = ${appStore.convertForce(el.values[0])} ${appStore.units.Force}`);
+  }
+
+  if (Math.abs(el.values[2]) > 1e-32) {
+    rows.push(`F<sub>z</sub> = ${appStore.convertForce(el.values[2])} ${appStore.units.Force}`);
+  }
+
+  if (Math.abs(el.values[4]) > 1e-32) {
+    rows.push(`M<sub>y</sub> = ${appStore.convertMoment(el.values[4])} ${appStore.units.Moment}`);
+  }
+
+  return { title: t('loads.nodalLoad'), body: rows.join('<br>') };
+};
+
+const buildPrescribedBCDetails = (el: PrescribedDisplacement): EntityDetails => {
+  const rows: string[] = [];
+
+  if (Math.abs(el.prescribedValues[0]) > 1e-32) {
+    rows.push(`D<sub>x</sub> = ${appStore.convertLength(el.prescribedValues[0])} ${appStore.units.Length}`);
+  }
+
+  if (Math.abs(el.prescribedValues[2]) > 1e-32) {
+    rows.push(`D<sub>z</sub> = ${appStore.convertLength(el.prescribedValues[2])} ${appStore.units.Length}`);
+  }
+
+  if (Math.abs(el.prescribedValues[4]) > 1e-32) {
+    rows.push(`R<sub>y</sub> = ${el.prescribedValues[4]} ${appStore.units.Angle}`);
+  }
+
+  return { title: t('loads.prescribedDisplacement'), body: rows.join('<br>') };
+};
+
+const buildNodeDetails = (node: Node): EntityDetails => {
+  const rows: string[] = [];
+
+  if (
+    projectStore.solver.loadCases[0].solved &&
+    projectStore.beams.some((element) => element.nodes.includes(node.label))
+  ) {
+    rows.push(
+      `u<sub>x</sub> = ${appStore.formatResultHTML(
+        // @ts-expect-error It return value for single Dof
+        node.getUnknowns(projectStore.solver.loadCases[0], [DofID.Dx])
+      )} m`
+    );
+
+    rows.push(
+      `u<sub>z</sub> = ${appStore.formatResultHTML(
+        // @ts-expect-error It return value for single Dof
+        node.getUnknowns(projectStore.solver.loadCases[0], [DofID.Dz])
+      )} m`
+    );
+
+    rows.push(
+      `φ<sub>y</sub> = ${appStore.formatResultHTML(
+        // @ts-expect-error It return value for single Dof
+        node.getUnknowns(projectStore.solver.loadCases[0], [DofID.Ry])
+      )} rad`
+    );
+  }
+
+  return { title: `${t('common.node')} ${escapeHtml(node.label)}`, body: rows.join('<br>') };
+};
+
+const onElementHover = (e: MouseEvent, el: Beam2D, showTooltip = true) => {
+  if (appStore.mouseMode === MouseMode.MOVING || !isMousePointer(e)) return;
+
+  intersected.value.type = 'element';
+  intersected.value.index = el.label;
+
+  if (showTooltip) showEntityTooltip(e, buildElementDetails(el));
+  else hideTooltip(false);
+
+  if (appStore.mouseMode === MouseMode.NONE) appStore.mouseMode = MouseMode.HOVER;
+};
+
+const onElementLoadHover = (e: MouseEvent, el: BeamElementLoad) => {
+  if (appStore.mouseMode === MouseMode.MOVING || !isMousePointer(e)) return;
+
+  showEntityTooltip(e, buildElementLoadDetails(el));
+
+  if (appStore.mouseMode === MouseMode.NONE) appStore.mouseMode = MouseMode.HOVER;
+};
+
+const onNodalLoadHover = (e: MouseEvent, el: NodalLoad) => {
+  if (appStore.mouseMode === MouseMode.MOVING || !isMousePointer(e)) return;
+
+  showEntityTooltip(e, buildNodalLoadDetails(el));
+
+  if (appStore.mouseMode === MouseMode.NONE) appStore.mouseMode = MouseMode.HOVER;
+};
+
+const onPrescribedBCHover = (e: MouseEvent, el: PrescribedDisplacement) => {
+  if (appStore.mouseMode === MouseMode.MOVING || !isMousePointer(e)) return;
+
+  showEntityTooltip(e, buildPrescribedBCDetails(el));
+
+  if (appStore.mouseMode === MouseMode.NONE) appStore.mouseMode = MouseMode.HOVER;
+};
+
+const onNodeHover = (e: MouseEvent, node: Node) => {
+  if (appStore.mouseMode === MouseMode.MOVING || !isMousePointer(e)) return;
+
+  intersected.value.type = 'node';
+  intersected.value.index = node.label;
+
+  showEntityTooltip(e, buildNodeDetails(node));
+
+  if (appStore.mouseMode === MouseMode.NONE) appStore.mouseMode = MouseMode.HOVER;
+};
+
+/**
+ * A press latches the node for dragging, and for the add element mode to snap onto it. Unlike the
+ * hover above it answers every pointer kind, being the only such signal a finger gives.
+ */
+const onNodePress = (e: PointerEvent, node: Node) => {
+  if (appStore.mouseMode === MouseMode.MOVING) return;
+
+  intersected.value.type = 'node';
+  intersected.value.index = node.label;
+
+  if (appStore.mouseMode === MouseMode.NONE) appStore.mouseMode = MouseMode.HOVER;
+};
+
+/**
+ * A long press stands in for the right button: it opens the same canvas menu, which is otherwise
+ * unreachable on a touch screen. It only arms where nothing else owns the gesture: not in a
+ * placing mode, and not on a node or a dimension, whose press starts a drag.
+ */
+const LONG_PRESS_MS = 500;
+let longPressTimer: number | null = null;
+/** True from the moment the menu opened until the gesture's pointerup has been swallowed. */
+let longPressFired = false;
+
+const cancelLongPress = () => {
+  if (longPressTimer !== null) window.clearTimeout(longPressTimer);
+  longPressTimer = null;
+};
+
+/**
+ * After a long press some browsers still fire a compatibility click at the touch point, which now
+ * lies on the freshly opened menu and would activate or close it. Eat the first click, briefly.
+ */
+const swallowNextClick = () => {
+  const swallow = (ev: MouseEvent) => {
+    ev.stopPropagation();
+    ev.preventDefault();
+  };
+
+  window.addEventListener('click', swallow, { capture: true });
+  window.setTimeout(() => window.removeEventListener('click', swallow, { capture: true }), 700);
+};
+
+/**
+ * Arms the next one finger drag to draw a selection box, the way a mouse drag does natively.
+ * Toggled from an on-screen button that only exists where there is no mouse to do it.
+ */
+const touchSelectArmed = ref(false);
+
+/** The canvas menu, at a point on screen. Shared by the long press and by a box drawn by finger. */
+const openCanvasMenu = (clientX: number, clientY: number, element: Beam2D | null = null) => {
+  swallowNextClick();
+
+  ctxMenuElement.value = element;
+  optionsCtxMenu.x = clientX;
+  optionsCtxMenu.y = clientY;
+  showCtxMenu.value = true;
+};
+
+const startLongPress = (e: PointerEvent) => {
+  cancelLongPress();
+
+  const { clientX, clientY } = e;
+  const element = elementAtEvent(e);
+
+  longPressTimer = window.setTimeout(() => {
+    longPressTimer = null;
+    longPressFired = true;
+    openCanvasMenu(clientX, clientY, element);
+  }, LONG_PRESS_MS);
+};
+
+const hasMoved = (e: MouseEvent | PointerEvent) => {
+  const dx = e.clientX - mouseStartX;
+  const dy = e.clientY - mouseStartY;
+  const d = Math.sqrt(Math.pow(dx, 2) + Math.pow(dy, 2));
+  if (d > 10) return true;
+
+  return false;
+};
+
+const TTWIDTH = 210;
+/** Kept clear of the window edges, and of the item the panel belongs to. */
+const SELECTION_PANEL_MARGIN = 8;
+
+const selectionPanel = ref<HTMLElement | null>(null);
+/** Screen rectangle the open panel is kept clear of: what the pointer itself covers. */
+let selectionAnchor: AnchorRect | null = null;
+
+/** Room the pointer takes: a cursor tip, or the fingertip the panel opens just below. */
+const POINTER_RADIUS_PX = 4;
+const FINGER_RADIUS_PX = 8;
+
+/**
+ * Puts the panel below the item it describes, or above it where the bottom of the window is
+ * closer, so a finger never covers what it has just opened. Measured once the panel has rendered,
+ * since it is as tall as the selection has to say.
+ */
+const clampSelectionPanel = () => {
+  const panel = selectionPanel.value;
+  if (!panel) return;
+
+  // The panel is positioned absolutely, so its coordinates are those of its offset parent.
+  const origin = (panel.offsetParent as HTMLElement | null)?.getBoundingClientRect();
+  const originLeft = origin?.left ?? 0;
+  const originTop = origin?.top ?? 0;
+
+  const { left, top } = placePopupNearAnchor({
+    anchor: selectionAnchor,
+    width: panel.offsetWidth || TTWIDTH,
+    height: panel.offsetHeight,
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    margin: SELECTION_PANEL_MARGIN,
+  });
+
+  projectStore.selection.x = left - originLeft;
+  projectStore.selection.y = top - originTop;
+};
+
+/**
+ * Whether the open panel was opened by a finger. A mouse reads the same properties from the hover
+ * tooltip, so it is only the pointers that get no tooltip that need them in the panel.
+ */
+const selectionOpenedByTouch = ref(false);
+
+/**
+ * Opens the selection panel at the point that was clicked or tapped, rather than at the item: the
+ * handle of an element spans the whole beam, and its box would put the panel far from the pointer.
+ */
+const placeSelectionPanel = (e: MouseEvent) => {
+  selectionOpenedByTouch.value = lastPointerType !== 'mouse';
+
+  const radius = selectionOpenedByTouch.value ? FINGER_RADIUS_PX : POINTER_RADIUS_PX;
+  selectionAnchor = {
+    left: e.clientX - radius,
+    right: e.clientX + radius,
+    top: e.clientY - radius,
+    bottom: e.clientY + radius,
+  };
+
+  // A first guess, so the panel is not seen at the previous selection for a frame.
+  projectStore.selection.x = e.clientX - TTWIDTH / 2;
+  projectStore.selection.y = selectionAnchor.bottom;
+
+  nextTick(clampSelectionPanel);
+};
+
+const onNodeClick = (e: MouseEvent) => {
+  // A placing mode owns the canvas: a press there places, it does not select.
+  if (hasMoved(e) || longPressFired || activeAddMode.value) return;
+
+  appStore.bottomBarTab = 'tab-nodes';
+
+  const target = e.target as HTMLElement;
+  const index = target.getAttribute('data-node-id') || '-1';
+
+  projectStore.selection.type = 'node';
+  projectStore.selection.label = index;
+
+  projectStore.clearSelection2();
+  projectStore.selection2.nodes = [index];
+
+  placeSelectionPanel(e);
+};
+
+const onElementClick = (e: MouseEvent, element: Beam2D) => {
+  // A placing mode owns the canvas: a press there places, it does not select.
+  if (hasMoved(e) || longPressFired || activeAddMode.value) return;
+
+  appStore.bottomBarTab = 'tab-elements';
+
+  projectStore.selection.type = 'element';
+  projectStore.selection.label = element.label;
+
+  projectStore.clearSelection2();
+  projectStore.selection2.elements = [String(element.label)];
+
+  placeSelectionPanel(e);
+};
+
+const onDimensionClick = (e: PointerEvent, dimensionId: string) => {
+  // A placing mode owns the canvas: a press there places, it does not select.
+  if (hasMoved(e) || longPressFired || activeAddMode.value) return;
+
+  projectStore.clearSelection();
+  projectStore.clearSelection2();
+  projectStore.selection2.dimensions = [dimensionId];
+
+  projectStore.selection.type = 'dimension';
+  projectStore.selection.label = dimensionId;
+
+  placeSelectionPanel(e);
+};
+
+const onDimensionPointerDown = (e: PointerEvent, dimensionId: string) => {
+  const dimension = findDimensionById(dimensionId);
+  if (dimension) convertDistanceToWorld(dimension);
+
+  pendingDimensionId = dimensionId;
+  pointerDownOriginatesFromDimension = true;
+  intersected.value.type = 'dimension';
+  intersected.value.index = dimensionId;
+  appStore.mouseMode = MouseMode.MOVING;
+};
+
+const onDimensionPointerUp = (e: PointerEvent, dimensionId: string) => {
+  if (isDraggingDimension()) return;
+
+  pendingDimensionId = null;
+  onDimensionClick(e, dimensionId);
+};
+
+const onDimensionPointPointerDown = (e: PointerEvent, dimensionId: string, pointIndex: number) => {
+  const dimension = findDimensionById(dimensionId);
+  if (!dimension || pointIndex < 0 || pointIndex > 1) return;
+
+  ensureDimensionSelected(dimensionId);
+  convertDistanceToWorld(dimension);
+
+  const currentPoint = dimension.points[pointIndex];
+  dragDimensionPoint = {
+    id: dimensionId,
+    dimension,
+    pointIndex: pointIndex as 0 | 1,
+    startPoint: createDimensionPoint(currentPoint.x, currentPoint.y, currentPoint.sourceNodeLabel ?? null),
+    lastPoint: createDimensionPoint(currentPoint.x, currentPoint.y, currentPoint.sourceNodeLabel ?? null),
+  };
+
+  pointerDownOriginatesFromDimension = true;
+  intersected.value.type = 'dimension-point';
+  intersected.value.index = `${dimensionId}:${pointIndex}`;
+  appStore.mouseMode = MouseMode.MOVING;
+  e.stopPropagation();
+};
+
+const onDimensionPointPointerUp = (e: PointerEvent, dimensionId: string) => {
+  if (isDraggingDimensionPoint()) {
+    finishDimensionPointDrag();
+    return;
+  }
+
+  onDimensionClick(e, dimensionId);
+};
+
+const onElementLoadClick = (e: MouseEvent, index: number) => {
+  // A placing mode owns the canvas: a press there places, it does not select.
+  if (hasMoved(e) || longPressFired || activeAddMode.value) return;
+
+  appStore.bottomBarTab = 'tab-loads';
+
+  projectStore.selection.type = 'element-load';
+  projectStore.selection.label = index;
+
+  projectStore.clearSelection2();
+  projectStore.selection2.elementLoads = [index];
+
+  placeSelectionPanel(e);
+};
+
+const onNodalLoadClick = (e: MouseEvent, index: number) => {
+  // A placing mode owns the canvas: a press there places, it does not select.
+  if (hasMoved(e) || longPressFired || activeAddMode.value) return;
+
+  appStore.bottomBarTab = 'tab-loads';
+
+  projectStore.selection.type = 'nodal-load';
+  projectStore.selection.label = index;
+
+  projectStore.clearSelection2();
+  projectStore.selection2.nodalLoads = [index];
+
+  placeSelectionPanel(e);
+};
+
+const onPrescribedBCClick = (e: MouseEvent, index: number) => {
+  // A placing mode owns the canvas: a press there places, it does not select.
+  if (hasMoved(e) || longPressFired || activeAddMode.value) return;
+
+  appStore.bottomBarTab = 'tab-loads';
+
+  projectStore.selection.type = 'prescribedbc-load';
+  projectStore.selection.label = index;
+
+  projectStore.clearSelection2();
+  projectStore.selection2.prescribedBC = [index];
+
+  placeSelectionPanel(e);
+};
+
+/**
+ * What the panel says about the current selection, worded as the hover tooltip words it, so a tap
+ * reaches everything a mouse reads by hovering. The panel header already names a node and an
+ * element, hence the subtitle only where the kind of the thing carries information of its own.
+ */
+const resolveSelectionDetails = (): { subtitle: string | null; body: string } | null => {
+  const { type, label } = projectStore.selection;
+  if (type === null || label === null || !selectionOpenedByTouch.value) return null;
+
+  const loadCase = projectStore.solver.loadCases[0];
+
+  if (type === 'node') {
+    const node = projectStore.solver.domain.nodes.get(String(label));
+    return node ? { subtitle: null, body: buildNodeDetails(node as Node).body } : null;
+  }
+
+  if (type === 'element') {
+    const element = projectStore.solver.domain.elements.get(String(label));
+    return element ? { subtitle: null, body: buildElementDetails(element as Beam2D).body } : null;
+  }
+
+  const withKind = (details: EntityDetails) => ({ subtitle: details.title, body: details.body });
+
+  if (type === 'element-load') {
+    const load = loadCase.elementLoadList[Number(label)];
+    return load ? withKind(buildElementLoadDetails(load)) : null;
+  }
+
+  if (type === 'nodal-load') {
+    const load = loadCase.nodalLoadList[Number(label)];
+    return load ? withKind(buildNodalLoadDetails(load)) : null;
+  }
+
+  if (type === 'prescribedbc-load') {
+    const bc = loadCase.prescribedBC[Number(label)];
+    return bc ? withKind(buildPrescribedBCDetails(bc)) : null;
+  }
+
+  return null;
+};
+
+/** What the selection panel is headed by. */
+const selectionTitle = computed(() =>
+  projectStore.selection.type ? t('selection.' + projectStore.selection.type) : ''
+);
+
+const selectionDetails = computed(() => {
+  const details = resolveSelectionDetails();
+  if (!details) return null;
+
+  const subtitle = selectionSubtitle(selectionTitle.value, details.subtitle);
+
+  return subtitle || details.body ? { subtitle, body: details.body } : null;
+});
+
+let drgNode: Node | null = null;
+let origX = 0;
+let origZ = 0;
+let finalX = 0;
+let finalZ = 0;
+let dragDimension: { id: string; dimension: DimensionEntry; startDistance: number; lastDistance: number } | null = null;
+let dragDimensionPoint: {
+  id: string;
+  dimension: DimensionEntry;
+  pointIndex: 0 | 1;
+  startPoint: DimensionPoint;
+  lastPoint: DimensionPoint;
+} | null = null;
+let pendingDimensionId: string | null = null;
+let pointerDownOriginatesFromDimension = false;
+
+const moveNode = () => {
+  if (!drgNode) return;
+
+  // undo/redo: rewind to the drag origin so the snapshot captures the pre-drag state,
+  // then apply the final position as a single undoable mutation.
+  {
+    const node = drgNode;
+    node.coords[0] = origX;
+    node.coords[2] = origZ;
+
+    executeModelMutationWithUndo(() => {
+      setUnsolved();
+      node.coords[0] = finalX;
+      node.coords[2] = finalZ;
+    });
+  }
+
+  drgNode = null;
+};
+
+const isDraggingDimension = () => dragDimension !== null;
+
+const isDraggingDimensionPoint = () => dragDimensionPoint !== null;
+
+const updateDimensionPointFromPointer = () => {
+  if (!dragDimensionPoint) return;
+
+  const nextPoint = getPointerDimensionPoint();
+  const updatedPoint = createDimensionPoint(nextPoint.x, nextPoint.y, nextPoint.sourceNodeLabel ?? null);
+  dragDimensionPoint.dimension.points[dragDimensionPoint.pointIndex] = updatedPoint;
+  dragDimensionPoint.lastPoint = updatedPoint;
+};
+
+const updateDimensionDistanceFromPointer = () => {
+  if (!dragDimension) return;
+  const points = getDimensionResolvedPoints(dragDimension.dimension);
+  if (!points) return;
+
+  convertDistanceToWorld(dragDimension.dimension);
+
+  const dx = points[1].x - points[0].x;
+  const dz = points[1].y - points[0].y;
+  const length = Math.sqrt(dx * dx + dz * dz);
+  if (!isFinite(length) || length === 0) return;
+
+  const normalX = dz / length;
+  const normalY = -dx / length;
+  const offset = (mouseXReal.value - points[0].x) * normalX + (mouseYReal.value - points[0].y) * normalY;
+  const newDistance = -offset;
+
+  if (!Number.isFinite(newDistance)) return;
+
+  dragDimension.dimension.distance = newDistance;
+  dragDimension.dimension.distanceUnit = 'world';
+  dragDimension.lastDistance = newDistance;
+};
+
+const startDimensionDrag = (dimensionId: string) => {
+  const dimension = findDimensionById(dimensionId);
+  if (!dimension) {
+    pendingDimensionId = null;
+    return false;
+  }
+
+  ensureDimensionSelected(dimensionId);
+  convertDistanceToWorld(dimension);
+  dimension.distanceUnit = 'world';
+
+  dragDimension = {
+    id: dimensionId,
+    dimension,
+    startDistance: dimension.distance ?? 0,
+    lastDistance: dimension.distance ?? 0,
+  };
+  pendingDimensionId = null;
+  appStore.mouseMode = MouseMode.MOVING;
+  intersected.value.type = 'dimension';
+  intersected.value.index = dimensionId;
+  return true;
+};
+
+const finishDimensionDrag = (shouldCommit = true) => {
+  if (!dragDimension) return;
+
+  const { dimension, startDistance, lastDistance } = dragDimension;
+  if (shouldCommit && Math.abs(lastDistance - startDistance) > 1e-6) {
+    dimension.distance = startDistance;
+    dimension.distanceUnit = 'world';
+
+    executeModelMutationWithUndo(() => {
+      dimension.distance = lastDistance;
+      dimension.distanceUnit = 'world';
+    });
+  } else if (!shouldCommit) {
+    dimension.distance = startDistance;
+    dimension.distanceUnit = 'world';
+  }
+
+  dragDimension = null;
+  appStore.mouseMode = MouseMode.NONE;
+  pendingDimensionId = null;
+};
+
+const finishDimensionPointDrag = (shouldCommit = true) => {
+  if (!dragDimensionPoint) return;
+
+  const { dimension, pointIndex, startPoint, lastPoint } = dragDimensionPoint;
+  const changed =
+    Math.abs(lastPoint.x - startPoint.x) > 1e-9 ||
+    Math.abs(lastPoint.y - startPoint.y) > 1e-9 ||
+    (lastPoint.sourceNodeLabel ?? null) !== (startPoint.sourceNodeLabel ?? null);
+
+  if (shouldCommit && changed) {
+    dimension.points[pointIndex] = createDimensionPoint(startPoint.x, startPoint.y, startPoint.sourceNodeLabel ?? null);
+
+    executeModelMutationWithUndo(() => {
+      dimension.points[pointIndex] = createDimensionPoint(lastPoint.x, lastPoint.y, lastPoint.sourceNodeLabel ?? null);
+    });
+  } else if (!shouldCommit) {
+    dimension.points[pointIndex] = createDimensionPoint(startPoint.x, startPoint.y, startPoint.sourceNodeLabel ?? null);
+  }
+
+  dragDimensionPoint = null;
+  appStore.mouseMode = MouseMode.NONE;
+  pendingDimensionId = null;
+};
+
+const cancelDimensionDrag = () => {
+  if (!dragDimension) {
+    pendingDimensionId = null;
+    return;
+  }
+
+  finishDimensionDrag(false);
+};
+
+const cancelDimensionPointDrag = () => {
+  if (!dragDimensionPoint) return;
+  finishDimensionPointDrag(false);
+};
+
+/**
+ * Model coordinates under the pointer, snapped to the grid when enabled.
+ *
+ * Screen coordinates are used rather than `offsetX`/`offsetY`, which are relative to whatever
+ * element the pointer happens to be over: a node handle, a load glyph or the grid. That differs
+ * between a pointerdown and the pointerup that follows it, and a touch lands on a child element
+ * far more often than a mouse does, which put placed nodes anywhere but under the finger.
+ */
+const updatePointerPosition = (e: PointerEvent) => {
+  appStore.mouse.x = e.clientX;
+  appStore.mouse.y = e.clientY;
+
+  const pointer = svg.value!.createSVGPoint();
+  pointer.x = e.clientX;
+  pointer.y = e.clientY;
+
+  const svgP1 = pointer.matrixTransform(screenToModelMatrix());
+
+  const mXReal = svgP1.x;
+  const mYReal = svgP1.y;
+
+  const realStep = viewerStore.gridStep;
+  const canSnap = viewerStore.snapToGrid && Number.isFinite(realStep) && realStep > 0;
+
+  const snappedX = Math.round(mXReal / realStep) * realStep;
+  const snappedY = Math.round(mYReal / realStep) * realStep;
+
+  mouseXReal.value = canSnap ? snappedX : mXReal;
+  mouseYReal.value = canSnap ? snappedY : mYReal;
+};
+
+const mouseMove = (e: PointerEvent) => {
+  lastPointerType = e.pointerType;
+
+  if (longPressTimer !== null && hasMoved(e)) cancelLongPress();
+
+  updatePointerPosition(e);
+
+  if (windowDrag.value) {
+    const p = screenToModel(e);
+
+    windowDrag.value = { ...windowDrag.value, x1: p.x, y1: p.y };
+
+    return;
+  }
+
+  if (pendingDimensionId && !isDraggingDimension() && hasMoved(e)) {
+    if (startDimensionDrag(pendingDimensionId)) {
+      updateDimensionDistanceFromPointer();
+    }
+  }
+
+  if (isDraggingDimensionPoint()) {
+    updateDimensionPointFromPointer();
+  }
+
+  if (isDraggingDimension()) {
+    updateDimensionDistanceFromPointer();
+  }
+
+  if (appStore.mouseMode === MouseMode.MOVING && intersected.value.type === 'node') {
+    const index = intersected.value.index;
+    if (index === null) return;
+
+    const item = useProjectStore().solver.domain.nodes.get(String(index))!;
+
+    if (drgNode === null) {
+      drgNode = item;
+      origX = item.coords[0];
+      origZ = item.coords[2];
+    }
+
+    useProjectStore().solver.domain.nodes.get(String(index))!.coords[0] = mouseXReal.value;
+
+    useProjectStore().solver.domain.nodes.get(String(index))!.coords[2] = mouseYReal.value;
+
+    finalX = mouseXReal.value;
+    finalZ = mouseYReal.value;
+
+    //useProjectStore().solver.loadCases[0].solved = false;
+    solve();
+  }
+};
+
+/**
+ * Runs the placing modes for a pointer at the current position. Returns whether it consumed the
+ * event. Called on pointerdown for a mouse, and on pointerup for touch, where a gesture only turns
+ * out to be a tap once the finger lifts.
+ */
+const placeAtPointer = (e: PointerEvent) => {
+  if (appStore.mouseMode === MouseMode.PASTE_CLIPBOARD) {
+    appStore.mouseMode = MouseMode.NONE;
+    useClipboardStore().paste({
+      x: mouseXReal.value - startNode.value.x + deltaPaste.value.x,
+      z: mouseYReal.value - startNode.value.y + deltaPaste.value.y,
+    });
+    startNode.value = null;
+    return true;
+  }
+
+  if (appStore.mouseMode === MouseMode.ADD_NODE) {
+    mouseStartX = -9999;
+
+    let newNodeId = projectStore.solver.domain.nodes.size + 1;
+
+    while (projectStore.solver.domain.nodes.has(newNodeId.toString())) {
+      newNodeId++;
+    }
+
+    // Check whether the node is being placed onto some of the existing elements
+    // If so, we need to ask the user if they want split the existing element or place individual node
+    for (const [, el] of projectStore.solver.domain.elements) {
+      const beam = el as Beam2D;
+      const n1 = projectStore.solver.domain.nodes.get(beam.nodes[0])!;
+      const n2 = projectStore.solver.domain.nodes.get(beam.nodes[1])!;
+
+      const dist = distanceToLineSegment(
+        { x: mouseXReal.value, y: mouseYReal.value },
+        { x: n1.coords[0], y: n1.coords[2] },
+        { x: n2.coords[0], y: n2.coords[2] }
+      );
+
+      if (dist < 0.1) {
+        openModal(Confirmation, {
+          title: t('confirmation.splitElementAndPlaceNode.title'),
+          message: t('confirmation.splitElementAndPlaceNode.message', { label: String(beam.label) }),
+          actions: [
+            {
+              label: t('confirmation.splitElementAndPlaceNode.split'),
+              color: 'green darken-1',
+              action: () => {
+                executeModelMutationWithUndo(() => {
+                  projectStore.solver.loadCases[0].solved = false;
+                  placeNode(newNodeId);
+
+                  const prevHinges = beam.hinges;
+
+                  const startNode = projectStore.solver.domain.nodes.get(beam.nodes[0])!;
+                  const endNode = projectStore.solver.domain.nodes.get(beam.nodes[1])!;
+                  const newNode = projectStore.solver.domain.nodes.get(String(newNodeId))!;
+                  const totalLength = Math.hypot(
+                    endNode.coords[0] - startNode.coords[0],
+                    endNode.coords[2] - startNode.coords[2]
+                  );
+                  const partialLength = Math.hypot(
+                    newNode.coords[0] - startNode.coords[0],
+                    newNode.coords[2] - startNode.coords[2]
+                  );
+                  const splitRatio = totalLength > 0 ? Math.min(Math.max(partialLength / totalLength, 0), 1) : 0.5;
+
+                  projectStore.solver.domain.createBeam2D(el.label + 'a', [el.nodes[0], newNodeId], el.mat, el.cs, [
+                    prevHinges[0],
+                    false,
+                  ]);
+
+                  projectStore.solver.domain.createBeam2D(el.label + 'b', [newNodeId, el.nodes[1]], el.mat, el.cs, [
+                    false,
+                    prevHinges[1],
+                  ]);
+
+                  for (const loadCase of projectStore.solver.loadCases) {
+                    loadCase.solved = false;
+                    for (let i = loadCase.elementLoadList.length - 1; i >= 0; i--) {
+                      const load = loadCase.elementLoadList[i];
+                      if (load.target !== el.label) continue;
+
+                      if (load instanceof BeamElementUniformEdgeLoad) {
+                        load.target = el.label + 'a';
+                        loadCase.createBeamElementUniformEdgeLoad(el.label + 'b', [...load.values], load.lcs);
+                      } else if (load instanceof BeamElementTrapezoidalEdgeLoad) {
+                        const midValues: [number, number] = [
+                          load.startValues[0] + (load.endValues[0] - load.startValues[0]) * splitRatio,
+                          load.startValues[1] + (load.endValues[1] - load.startValues[1]) * splitRatio,
+                        ];
+                        const startValues: [number, number] = [...load.startValues] as [number, number];
+                        const endValues: [number, number] = [...load.endValues] as [number, number];
+                        load.change(el.label + 'a', startValues, midValues, load.lcs);
+                        loadCase.createBeamElementTrapezoidalEdgeLoad(el.label + 'b', midValues, endValues, load.lcs);
+                      } else {
+                        load.target = el.label + 'a';
+                      }
+                    }
+                  }
+
+                  projectStore.solver.domain.elements.delete(el.label);
+                });
+
+                appStore.mouseMode = MouseMode.NONE;
+                closeModal();
+              },
+            },
+            {
+              label: t('confirmation.placeIndividualNode'),
+              color: 'blue darken-1',
+              action: () => {
+                executeModelMutationWithUndo(() => {
+                  projectStore.solver.loadCases[0].solved = false;
+                  placeNode(newNodeId);
+                });
+
+                appStore.mouseMode = MouseMode.NONE;
+                closeModal();
+              },
+            },
+            {
+              label: t('dialogs.common.cancel'),
+              color: 'red darken-1',
+              action: () => {
+                closeModal();
+              },
+            },
+          ],
+          minWidth: 480,
+        });
+
+        e.stopPropagation();
+        e.preventDefault();
+        return true;
+      }
+    }
+
+    // No existing element was found, just add the node
+    executeModelMutationWithUndo(() => {
+      placeNode(newNodeId);
+    });
+
+    return true;
+  }
+
+  if (appStore.mouseMode === MouseMode.ADD_ELEMENT) {
+    mouseStartX = -9999;
+    if (startNode.value === null) {
+      const n = projectStore.solver.domain.nodes.get(intersected.value.index as string);
+
+      // No node selected, but want to add element
+      // So we add a node for the user
+      if (!n) {
+        let newNodeId = projectStore.solver.domain.nodes.size + 1;
+
+        while (projectStore.solver.domain.nodes.has(newNodeId.toString())) {
+          newNodeId++;
+        }
+
+        executeModelMutationWithUndo(() => {
+          projectStore.solver.domain.createNode(newNodeId, [mouseXReal.value, 0, mouseYReal.value]);
+        });
+
+        startNode.value = { label: newNodeId, x: mouseXReal.value, y: mouseYReal.value };
+
+        return true;
+      }
+
+      startNode.value = { label: intersected.value.index, x: n.coords[0], y: n.coords[2] };
+    } else if (intersected.value.type === 'node') {
+      projectStore.solver.loadCases[0].solved = false;
+      let newElId = projectStore.solver.domain.elements.size + 1;
+
+      while (projectStore.solver.domain.elements.has(newElId.toString())) {
+        newElId++;
+      }
+
+      const nid = startNode.value.label;
+      if (nid === null || intersected.value.index === null) return true;
+      const mat = [...useProjectStore().solver.domain.materials.values()][0].label;
+      const cs = [...useProjectStore().solver.domain.crossSections.values()][0].label;
+      executeModelMutationWithUndo(() => {
+        projectStore.solver.domain.createBeam2D(newElId, [String(nid), String(intersected.value.index)], mat, cs, [
+          ...addElementHinges.value,
+        ]);
+      });
+
+      const n = projectStore.solver.domain.nodes.get(intersected.value.index as string)!;
+      startNode.value = { label: intersected.value.index, x: n.coords[0], y: n.coords[2] };
+    } else {
+      projectStore.solver.loadCases[0].solved = false;
+
+      // No end node selected, just add new
+      let newNodeId = projectStore.solver.domain.nodes.size + 1;
+
+      while (projectStore.solver.domain.nodes.has(newNodeId.toString())) {
+        newNodeId++;
+      }
+
+      let newElId = projectStore.solver.domain.elements.size + 1;
+
+      while (projectStore.solver.domain.elements.has(newElId.toString())) {
+        newElId++;
+      }
+
+      const nid = startNode.value.label;
+      if (nid === null) return true;
+      const mat = [...useProjectStore().solver.domain.materials.values()][0].label;
+      const cs = [...useProjectStore().solver.domain.crossSections.values()][0].label;
+      executeModelMutationWithUndo(() => {
+        projectStore.solver.domain.createNode(newNodeId, [mouseXReal.value, 0, mouseYReal.value]);
+        projectStore.solver.domain.createBeam2D(newElId, [String(nid), String(newNodeId)], mat, cs, [
+          ...addElementHinges.value,
+        ]);
+      });
+
+      startNode.value = { label: newNodeId, x: mouseXReal.value, y: mouseYReal.value };
+    }
+
+    return true;
+  }
+
+  if (appStore.mouseMode === MouseMode.ADD_DIMLINE) {
+    mouseStartX = -9999;
+    if (startNode.value === null) {
+      const startPoint = getPointerDimensionPoint();
+      startNode.value = {
+        label: startPoint.sourceNodeLabel ?? null,
+        x: startPoint.x,
+        y: startPoint.y,
+        sourceNodeLabel: startPoint.sourceNodeLabel ?? null,
+      };
+    } else {
+      const endPoint = getPointerDimensionPoint();
+      const samePoint = Math.hypot(endPoint.x - startNode.value.x, endPoint.y - startNode.value.y) < 1e-9;
+
+      if (samePoint) {
+        startNode.value = null;
+        appStore.mouseMode = MouseMode.NONE;
+        return true;
+      }
+
+      executeModelMutationWithUndo(() => {
+        projectStore.dimensions.push({
+          id: createDimensionId(),
+          distance: dimlineDist.value / (scale.value || 1),
+          distanceUnit: 'world',
+          points: [
+            createDimensionPoint(startNode.value!.x, startNode.value!.y, startNode.value!.sourceNodeLabel ?? null),
+            endPoint,
+          ],
+        });
+      });
+
+      startNode.value = null;
+      appStore.mouseMode = MouseMode.NONE;
+    }
+
+    return true;
+  }
+
+  return false;
+};
+
+const onMouseDown = (e: PointerEvent) => {
+  lastPointerType = e.pointerType;
+
+  // Identity, not a flag: a press that lands outside the canvas then leaves nothing armed here.
+  if (e === ctxMenuDismissEvent) {
+    ctxMenuDismissEvent = null;
+    return;
+  }
+
+  // Picking a window: the drag is the whole interaction, nothing is selected or placed.
+  if (appStore.mouseMode === MouseMode.PICK_WINDOW) {
+    if (e.button !== 0) return;
+
+    const p = screenToModel(e);
+
+    windowDrag.value = { x0: p.x, y0: p.y, x1: p.x, y1: p.y };
+
+    // Keeps the drag when the pointer leaves the drawing; refused for synthetic events.
+    try {
+      (e.currentTarget as Element).setPointerCapture(e.pointerId);
+    } catch {
+      /* not a real pointer */
+    }
+
+    return;
+  }
+
+  //if (this.svgPanZoom == null) return;
+  const skipClearingSelection = pointerDownOriginatesFromDimension;
+  pointerDownOriginatesFromDimension = false;
+
+  if (!skipClearingSelection) {
+    projectStore.clearSelection();
+
+    if (e.button !== 2) projectStore.clearSelection2();
+  }
+
+  if ('activeElement' in document) (document.activeElement as HTMLElement).blur();
+
+  // The primary pointer starts a fresh gesture; anything left over from a lost pointerup is stale.
+  if (e.isPrimary) activePointers.clear();
+  activePointers.add(e.pointerId);
+
+  // A second finger turns the gesture into a pinch or a two finger pan. Nothing may be placed by
+  // it, and the tap the first finger had started is off.
+  if (activePointers.size > 1) {
+    pendingTap = false;
+    cancelLongPress();
+    return;
+  }
+
+  updatePointerPosition(e);
+
+  mouseStartX = e.clientX;
+  mouseStartY = e.clientY;
+
+  // Touch has no hover and no way to take a press back, so a placing mode waits for the finger to
+  // lift: by then a pinch, a pan or a drag has ruled itself out.
+  if (e.pointerType !== 'mouse' && e.button === 0 && activeAddMode.value) {
+    pendingTap = true;
+    return;
+  }
+
+  if (
+    e.pointerType !== 'mouse' &&
+    e.button === 0 &&
+    appStore.mouseMode !== MouseMode.MOVING &&
+    !touchSelectArmed.value
+  ) {
+    startLongPress(e);
+  }
+
+  if (e.button === 0 /* && typeof e.button !== "undefined" */) {
+    //this.svgPanZoom.disablePan();
+    //mouseStartX = e.offsetX;
+    //mouseStartY = e.offsetY;
+
+    if (placeAtPointer(e)) return;
+
+    if (appStore.mouseMode === MouseMode.HOVER) {
+      if (intersected.value.type === 'node') hideTooltip(false);
+      appStore.mouseMode = MouseMode.MOVING;
+    } else if ((e.pointerType === 'mouse' || touchSelectArmed.value) && appStore.mouseMode !== MouseMode.MOVING) {
+      appStore.mouseMode = MouseMode.SELECTING;
+      appStore.mouse.sx = e.clientX;
+      appStore.mouse.sy = e.clientY;
+    }
+  } else {
+    appStore.mouseMode = MouseMode.NONE;
+    startNode.value = null;
+    //svgPanZoom.enablePan();
+  }
+};
+
+interface Point {
+  x: number;
+  y: number;
+}
+
+type DimensionEntry = DimensionLine;
+
+const getDimensionId = (dim: { id?: string }) => {
+  return ensureDimensionId(dim);
+};
+
+const convertDistanceToWorld = (dim: DimensionEntry) => {
+  if (dim.distanceUnit === 'world') return;
+
+  const currentScale = scale.value || 1;
+  const baseline = dim.distance ?? dimlineDist.value;
+  const worldDistance = baseline / (currentScale === 0 ? 1 : currentScale);
+
+  dim.distance = worldDistance;
+  dim.distanceUnit = 'world';
+};
+
+/**
+ * A model saved before dimension distances were kept in world units brings them in pixels, and
+ * only the viewer knows the scale to convert them by. Migrated when the dimensions arrive rather
+ * than while the drawing is being rendered: a computed that writes to what it reads invalidates
+ * itself, and this ran over every dimension on every render for something that happens once.
+ */
+watch(
+  () => projectStore.dimensions,
+  (dimensions) => dimensions.forEach((dim) => convertDistanceToWorld(dim as DimensionEntry)),
+  { immediate: true }
+);
+
+const normalizedDimensions = computed(() => projectStore.dimensions as DimensionEntry[]);
+
+const getDimensionResolvedPoints = (dim: DimensionEntry): [DimensionPoint, DimensionPoint] | null =>
+  resolveDimensionPoints(dim, projectStore.solver.domain.nodes);
+
+const getDimensionRenderableNodes = (dim: DimensionEntry) => {
+  const points = getDimensionResolvedPoints(dim);
+  if (!points) return null;
+
+  return [
+    createDimensionRenderableNode(points[0], dim.points[0].sourceNodeLabel ?? null),
+    createDimensionRenderableNode(points[1], dim.points[1].sourceNodeLabel ?? null),
+  ];
+};
+
+const getDimensionSegment = (dim: DimensionEntry): { start: Point; end: Point } | null => {
+  const points = getDimensionResolvedPoints(dim);
+  if (!points) return null;
+
+  const dx = points[1].x - points[0].x;
+  const dz = points[1].y - points[0].y;
+  const length = Math.sqrt(dx * dx + dz * dz);
+
+  if (!isFinite(length) || length === 0) return null;
+
+  const normalX = dz / length;
+  const normalY = -dx / length;
+  const offset = -(dim.distance ?? 0);
+
+  const dnx = offset * normalX;
+  const dny = offset * normalY;
+
+  return {
+    start: { x: points[0].x + dnx, y: points[0].y + dny },
+    end: { x: points[1].x + dnx, y: points[1].y + dny },
+  };
+};
+
+const findDimensionById = (dimensionId: string): DimensionEntry | undefined => {
+  return projectStore.dimensions.find((dim) => getDimensionId(dim) === dimensionId);
+};
+
+const ensureDimensionSelected = (dimensionId: string) => {
+  if (!projectStore.selection2.dimensions.includes(dimensionId)) {
+    projectStore.clearSelection2();
+    projectStore.selection2.dimensions = [dimensionId];
+  }
+};
+
+function distanceToLineSegment(point: Point, lineStart: Point, lineEnd: Point): number {
+  const lengthSquared = (v: Point) => v.x * v.x + v.y * v.y;
+  const dot = (v: Point, w: Point) => v.x * w.x + v.y * w.y;
+  const sub = (v: Point, w: Point) => ({ x: v.x - w.x, y: v.y - w.y });
+  const l2 = lengthSquared(sub(lineStart, lineEnd));
+  if (l2 === 0) return Math.sqrt(lengthSquared(sub(point, lineStart))); // Line is a point.
+  const t = Math.max(0, Math.min(1, dot(sub(point, lineStart), sub(lineEnd, lineStart)) / l2));
+  const projection = { x: lineStart.x + t * (lineEnd.x - lineStart.x), y: lineStart.y + t * (lineEnd.y - lineStart.y) };
+  return Math.sqrt(lengthSquared(sub(point, projection)));
+}
+
+const isIntersecting = (lineStart: Point, lineEnd: Point, rectStart: Point, rectEnd: Point): boolean => {
+  const isInside = (p: Point): boolean => {
+    return (
+      p.x >= Math.min(rectStart.x, rectEnd.x) &&
+      p.x <= Math.max(rectStart.x, rectEnd.x) &&
+      p.y >= Math.min(rectStart.y, rectEnd.y) &&
+      p.y <= Math.max(rectStart.y, rectEnd.y)
+    );
+  };
+
+  const doesIntersect = (p1: Point, p2: Point, q1: Point, q2: Point): boolean => {
+    const o1 = (q1.y - p1.y) * (p2.x - p1.x) - (p2.y - p1.y) * (q1.x - p1.x);
+    const o2 = (q2.y - p1.y) * (p2.x - p1.x) - (p2.y - p1.y) * (q2.x - p1.x);
+    const o3 = (q1.y - p2.y) * (p1.x - p2.x) - (p1.y - p2.y) * (q1.x - p2.x);
+    const o4 = (q2.y - p2.y) * (p1.x - p2.x) - (p1.y - p2.y) * (q2.x - p2.x);
+
+    return o1 * o2 < 0 && o3 * o4 < 0;
+  };
+
+  if (lineStart.y < rectStart.y && lineEnd.y < rectStart.y) return false;
+  if (lineStart.y > rectEnd.y && lineEnd.y > rectEnd.y) return false;
+  if (lineStart.x < rectStart.x && lineEnd.x < rectStart.x) return false;
+  if (lineStart.x > rectEnd.x && lineEnd.x > rectEnd.x) return false;
+
+  return (
+    isInside(lineStart) ||
+    isInside(lineEnd) ||
+    doesIntersect(lineStart, lineEnd, rectStart, { x: rectStart.x, y: rectEnd.y }) ||
+    doesIntersect(lineStart, lineEnd, { x: rectStart.x, y: rectEnd.y }, rectEnd) ||
+    doesIntersect(lineStart, lineEnd, rectEnd, { x: rectStart.x, y: rectStart.y }) ||
+    doesIntersect(lineStart, lineEnd, { x: rectStart.x, y: rectStart.y }, rectStart)
+  );
+};
+
+const clientToSvgCoords = (ecoords: { x: number; y: number }, svgElement: SVGSVGElement): { x: number; y: number } => {
+  const pt = svgElement.createSVGPoint();
+  pt.x = ecoords.x;
+  pt.y = ecoords.y;
+
+  const cursorPt = pt.matrixTransform(svgElement.getScreenCTM().inverse());
+
+  return { x: cursorPt.x, y: cursorPt.y };
+};
+
+/** The browser took the gesture over (scroll, pinch, palm rejection); it places nothing. */
+const onPointerCancel = (e: PointerEvent) => {
+  activePointers.delete(e.pointerId);
+  pendingTap = false;
+  cancelLongPress();
+  longPressFired = false;
+};
+
+const onMouseUp = (e: PointerEvent) => {
+  activePointers.delete(e.pointerId);
+  cancelLongPress();
+
+  // The press became the menu; its release is not a tap and must not select or place.
+  if (longPressFired) {
+    longPressFired = false;
+    return;
+  }
+
+  if (windowDrag.value) {
+    const box = windowPickBox(windowDrag.value);
+
+    // A click that never became a drag is not a window; keep waiting for one.
+    if (box && box.w > 0 && box.h > 0) finishWindowPick(box);
+    else windowDrag.value = null;
+
+    return;
+  }
+
+  if (pendingTap) {
+    pendingTap = false;
+
+    // One finger, and no second one that would have made this a pinch. Pasting is placed wherever
+    // the finger ends, since carrying the preview there is how it is aimed; the other modes place
+    // only if it stayed put, so a pan or a drag still places nothing.
+    const carried = appStore.mouseMode === MouseMode.PASTE_CLIPBOARD;
+
+    if (activePointers.size === 0 && (carried || !hasMoved(e))) {
+      updatePointerPosition(e);
+      placeAtPointer(e);
+    }
+
+    return;
+  }
+
+  if (appStore.mouseMode === MouseMode.ADD_NODE) return;
+  if (appStore.mouseMode === MouseMode.ADD_ELEMENT) return;
+  if (appStore.mouseMode === MouseMode.ADD_DIMLINE) return;
+
+  if (appStore.mouseMode === MouseMode.MOVING) {
+    if (intersected.value.type === 'node') {
+      moveNode();
+    } else if (intersected.value.type === 'dimension-point') {
+      finishDimensionPointDrag();
+    } else if (intersected.value.type === 'dimension') {
+      finishDimensionDrag();
+    }
+  }
+
+  if (!isDraggingDimension() && !isDraggingDimensionPoint()) {
+    pendingDimensionId = null;
+  }
+
+  if (appStore.mouseMode === MouseMode.SELECTING) {
+    const selectedNodes = [];
+    const selectedElements = [];
+    const selectedNodalLoads = [];
+    const selectedElementLoads = [];
+    const selectedPrescribedBC = [];
+    const selectedDimensions = [];
+
+    const current = clientToSvgCoords({ x: e.clientX, y: e.clientY }, svg.value!);
+    const prev = clientToSvgCoords({ x: appStore.mouse.sx, y: appStore.mouse.sy }, svg.value!);
+
+    const rx1 = Math.min(current.x, prev.x);
+    const rx2 = Math.max(current.x, prev.x);
+    const ry1 = Math.min(current.y, prev.y);
+    const ry2 = Math.max(current.y, prev.y);
+
+    // Loop over nodes and check if node in rectangle
+    for (const [label, n] of useProjectStore().solver.domain.nodes) {
+      if (n.coords[0] > rx1 && n.coords[0] < rx2 && n.coords[2] > ry1 && n.coords[2] < ry2) {
+        selectedNodes.push(label);
+
+        // Also select corresponding nodal load
+        for (let i = 0; i < useProjectStore().solver.loadCases[0].nodalLoadList.length; i++) {
+          const nl = useProjectStore().solver.loadCases[0].nodalLoadList[i];
+          if (nl.target === label) {
+            selectedNodalLoads.push(i);
+          }
+        }
+
+        // Also select corresponding prescribed BC
+        for (let i = 0; i < useProjectStore().solver.loadCases[0].prescribedBC.length; i++) {
+          const nl = useProjectStore().solver.loadCases[0].prescribedBC[i];
+          if (nl.target === label) {
+            selectedPrescribedBC.push(i);
+          }
+        }
+      }
+    }
+
+    for (const dim of normalizedDimensions.value) {
+      const segment = getDimensionSegment(dim);
+      if (!segment) continue;
+
+      if (isIntersecting(segment.start, segment.end, { x: rx1, y: ry1 }, { x: rx2, y: ry2 })) {
+        selectedDimensions.push(getDimensionId(dim));
+      }
+    }
+
+    // Loop over elements and check if element in rectangle
+    for (const [label, el] of useProjectStore().solver.domain.elements) {
+      const n1 = useProjectStore().solver.domain.nodes.get(el.nodes[0])!;
+      const n2 = useProjectStore().solver.domain.nodes.get(el.nodes[1])!;
+
+      if (
+        isIntersecting(
+          { x: n1.coords[0], y: n1.coords[2] },
+          { x: n2.coords[0], y: n2.coords[2] },
+          { x: rx1, y: ry1 },
+          { x: rx2, y: ry2 }
+        )
+      ) {
+        selectedElements.push(label);
+
+        // Select corresponding element loads
+        for (let i = 0; i < useProjectStore().solver.loadCases[0].elementLoadList.length; i++) {
+          const el = useProjectStore().solver.loadCases[0].elementLoadList[i];
+          if (el.target === label) {
+            selectedElementLoads.push(i);
+          }
+        }
+      }
+    }
+
+    /*if (selectedElements.length > 0 || selectedNodes.length > 0) {
+      appStore.rightDrawerOpen = true;
+    } else {
+      appStore.rightDrawerOpen = false;
+    }*/
+
+    const selectedByBox =
+      selectedNodes.length +
+      selectedElements.length +
+      selectedNodalLoads.length +
+      selectedElementLoads.length +
+      selectedPrescribedBC.length +
+      selectedDimensions.length;
+    const wasMouse = e.pointerType === 'mouse';
+
+    projectStore.clearSelection2();
+    projectStore.selection2.elements = selectedElements;
+    projectStore.selection2.nodes = selectedNodes;
+    projectStore.selection2.nodalLoads = selectedNodalLoads;
+    projectStore.selection2.elementLoads = selectedElementLoads;
+    projectStore.selection2.prescribedBC = selectedPrescribedBC;
+    projectStore.selection2.dimensions = selectedDimensions;
+
+    /*
+     * A box drawn by finger opens the menu on release.
+     *
+     * The toggle only ever selected: a long press on what it selected is read as a press on the
+     * canvas and takes the selection away again, so Copy, Paste and Delete could not be reached at
+     * all. Offering them where the finger lifts is what makes a multiple selection worth having,
+     * and it costs no extra gesture. A box that caught nothing opens nothing.
+     */
+
+    if (!wasMouse && selectedByBox > 0) openCanvasMenu(e.clientX, e.clientY);
+
+    // One box per arming: the toggle hands the next drag back to panning.
+    touchSelectArmed.value = false;
+  }
+
+  appStore.mouseMode = MouseMode.NONE;
+
+  intersected.value.type = null;
+  intersected.value.index = null;
+};
+
+const showCtxMenu = ref(false);
+/** The element the menu was opened over, if any: what a dimension can be built from directly. */
+const ctxMenuElement = ref<Beam2D | null>(null);
+/** The very press that dismissed the menu: the canvas must not read it as a press of its own. */
+let ctxMenuDismissEvent: PointerEvent | null = null;
+const optionsCtxMenu = reactive({
+  zIndex: 3000,
+  minWidth: 230,
+  x: 0,
+  y: 0,
+});
+
+/** The element under a pointer, from the handle it landed on. */
+const elementAtEvent = (e: Event) => {
+  const handle = e.target instanceof Element ? e.target.closest('[data-element-id]') : null;
+  const label = handle?.getAttribute('data-element-id');
+  if (label === null || label === undefined) return null;
+
+  return projectStore.beams.find((beam) => String(beam.label) === label) ?? null;
+};
+
+const openCtxMenu = (e: MouseEvent) => {
+  if (hasMoved(e) || longPressFired) return;
+
+  ctxMenuElement.value = elementAtEvent(e);
+  optionsCtxMenu.x = e.clientX;
+  optionsCtxMenu.y = e.clientY;
+
+  showCtxMenu.value = true;
+};
+
+/**
+ * The menu closes itself on a click outside, but the canvas suppresses the compatibility click a
+ * tap would fire (SVGPanZoom prevents the touch defaults), so on a touch screen nothing ever
+ * dismissed it. Watch presses instead, and swallow the one that closed the menu.
+ */
+const closeCtxMenuOnOutsidePress = (e: PointerEvent) => {
+  if (e.target instanceof Element && e.target.closest('.mx-context-menu')) return;
+
+  ctxMenuDismissEvent = e;
+  showCtxMenu.value = false;
+};
+
+watch(showCtxMenu, (open) => {
+  if (open) {
+    document.addEventListener('pointerdown', closeCtxMenuOnOutsidePress, true);
+    return;
+  }
+
+  document.removeEventListener('pointerdown', closeCtxMenuOnOutsidePress, true);
+  ctxMenuElement.value = null;
+});
+
+onUnmounted(() => document.removeEventListener('pointerdown', closeCtxMenuOnOutsidePress, true));
+
+/** Dimensions the element the menu was opened over, end node to end node. */
+const addDimensionAlongElement = () => {
+  const element = ctxMenuElement.value;
+  if (!element) return;
+
+  const nodes = element.nodes.map((label) => projectStore.solver.domain.nodes.get(String(label)));
+  if (!nodes[0] || !nodes[1]) return;
+
+  executeModelMutationWithUndo(() => {
+    projectStore.dimensions.push({
+      id: createDimensionId(),
+      distance: dimlineDist.value / (scale.value || 1),
+      distanceUnit: 'world',
+      points: [createDimensionPointFromNode(nodes[0]!), createDimensionPointFromNode(nodes[1]!)],
+    });
+  });
+};
+
+/** The drawing stays invisible until the first fit has landed, so it never jumps into place. */
+const isFitted = computed(() => panZoom.value?.fitted ?? false);
+
+// Nothing is moving before the pan zoom is in the document, and these are read as booleans.
+const isZooming = computed(() => panZoom.value?.zooming ?? false);
+
+const isPanning = computed(() => panZoom.value?.panning ?? false);
+
+const dynamicMarker = (label: string) => {
+  return `url(#${props.id}-${label})`;
+};
+
+// Computed dynamic markers
+const markerForce = computed(() => dynamicMarker('force'));
+const markerForceHover = computed(() => dynamicMarker('force_hover'));
+const markerForceSelected = computed(() => dynamicMarker('force_selected'));
+const markerCentered = computed(() => dynamicMarker('force_centered'));
+const markerCenteredHover = computed(() => dynamicMarker('force_centered_hover'));
+
+const markerMomentCw = computed(() => dynamicMarker('moment_cw'));
+const markerMomentCwHover = computed(() => dynamicMarker('moment_cw_hover'));
+const markerMomentCwSelected = computed(() => dynamicMarker('moment_cw_selected'));
+
+const markerMomentCcw = computed(() => dynamicMarker('moment_ccw'));
+const markerMomentCcwHover = computed(() => dynamicMarker('moment_ccw_hover'));
+const markerMomentCcwSelected = computed(() => dynamicMarker('moment_ccw_selected'));
+
+const markerRotationCw = computed(() => dynamicMarker('rotation_cw'));
+const markerRotationCcw = computed(() => dynamicMarker('rotation_ccw'));
+
+const markerRotationCwHover = computed(() => dynamicMarker('rotation_cw_hover'));
+const markerRotationCwSelected = computed(() => dynamicMarker('rotation_cw_selected'));
+const markerRotationCcwHover = computed(() => dynamicMarker('rotation_ccw_hover'));
+const markerRotationCcwSelected = computed(() => dynamicMarker('rotation_ccw_selected'));
+
+const markerReaction = computed(() => dynamicMarker('reaction'));
+const markerMomentReactionCcw = computed(() => dynamicMarker('moment_reaction_ccw'));
+const markerMomentReactionCw = computed(() => dynamicMarker('moment_reaction_cw'));
+const markerDot = computed(() => dynamicMarker('dot'));
+const markerDotMovingX = computed(() => dynamicMarker('dot-moving-x'));
+const markerDotTorsion = computed(() => dynamicMarker('dot-torsion'));
+const markerHingeXY = computed(() => dynamicMarker('hinge-xy'));
+const markerHingeX = computed(() => dynamicMarker('hinge-x'));
+const markerHingeY = computed(() => dynamicMarker('hinge-y'));
+const markerForceTip = computed(() => dynamicMarker('forceTip'));
+const markerForceTipHover = computed(() => dynamicMarker('forceTip_hover'));
+const markerForceTipSelected = computed(() => dynamicMarker('forceTip_selected'));
+const markerDimTip = computed(() => dynamicMarker('dimTip'));
+
+const markerTextLabel = computed(() => dynamicMarker('textLabel'));
+
+defineExpose({ centerContent, fitContent });
+</script>
+
+<template>
+  <div class="d-flex flex-column fill-height svg-viewer">
+    <!-- <div style="position: absolute; top: 0; left: 0; background: red; z-index: 101">{{ intersected }}</div> -->
+    <div
+      v-if="!appStore.inViewerMode"
+      class="text-body-2 d-flex ga-1 line-height-1"
+      style="position: absolute; z-index: 100; bottom: 16px; right: 16px"
+    >
+      <div class="d-flex align-center ga-1">
+        <v-chip density="compact" class="d-flex pa-0 overflow-hidden">
+          <!-- Grid toggle -->
+          <v-tooltip text="Toggle grid (G)" location="top" :open-on-click="!deviceHasHover">
+            <template #activator="{ props: tooltipProps }">
+              <v-btn
+                v-bind="tooltipProps"
+                size="24"
+                density="compact"
+                variant="text"
+                rounded="0"
+                :class="viewerStore.showGrid ? 'text-black' : 'text-grey'"
+                @click="toggleGridVisibility"
+              >
+                <div>G</div>
+              </v-btn>
+            </template>
+          </v-tooltip>
+          <!-- Snap to grid -->
+          <v-tooltip text="Toggle snap to grid (S)" location="top" :open-on-click="!deviceHasHover">
+            <template #activator="{ props: tooltipProps }">
+              <v-btn
+                v-bind="tooltipProps"
+                size="24"
+                density="compact"
+                variant="text"
+                rounded="0"
+                :class="viewerStore.snapToGrid ? 'text-black' : 'text-grey'"
+                @click="toggleSnapToGrid"
+              >
+                <div>S</div>
+              </v-btn>
+            </template>
+          </v-tooltip>
+        </v-chip>
+      </div>
+      <v-chip-group>
+        <v-chip class="justify-end" density="compact" @click="appStore.openSettings()">
+          <div class="d-flex ga-1">
+            <span v-html="formatMeasureAsHTML(appStore.units.Length)"></span>
+            <span v-html="formatMeasureAsHTML(appStore.units.Area)"></span>
+            <span v-html="formatMeasureAsHTML(appStore.units.Force)"></span>
+            <span v-html="formatMeasureAsHTML(appStore.units.Moment)"></span>
+            <span v-html="formatMeasureAsHTML(appStore.units.Pressure)"></span>
+          </div>
+        </v-chip>
+      </v-chip-group>
+
+      <!-- <v-chip-group>
+        <v-chip density="compact">
+          {{ projectStore.solver.neq }} free DOFs {{ projectStore.solver.pneq }} supported DOFs
+        </v-chip>
+      </v-chip-group> -->
+    </div>
+    <div v-if="!appStore.inViewerMode" id="undoRedo" style="position: absolute; top: 24px; left: 24px; z-index: 100">
+      <v-btn
+        icon="mdi:mdi-undo"
+        size="32"
+        density="comfortable"
+        class="mr-1"
+        rounded="lg"
+        title="Undo"
+        @click="undoModelChange()"
+      ></v-btn>
+      <v-btn
+        icon="mdi:mdi-redo"
+        size="32"
+        density="comfortable"
+        class="mr-1"
+        rounded="lg"
+        title="Redo"
+        @click="redoModelChange()"
+      ></v-btn>
+    </div>
+    <div id="viewerControls" class="text-black d-flex" style="position: absolute; z-index: 100; top: 24px; right: 24px">
+      <!--
+        Shown wherever a finger can reach the screen, not only where nothing else can. A laptop with
+        a touch screen has hover and had this hidden from it - and it is the device that needs it
+        most, since there a drag of the mouse already selects a window and a drag of the finger
+        cannot.
+      -->
+      <v-btn
+        v-if="deviceCanTouch"
+        icon="mdi:mdi-select-drag"
+        size="32"
+        density="comfortable"
+        class="mr-1"
+        rounded="lg"
+        title="Box select"
+        :color="touchSelectArmed ? 'primary' : 'default'"
+        @click="touchSelectArmed = !touchSelectArmed"
+      ></v-btn>
+      <v-btn
+        icon="mdi:mdi-image-filter-center-focus"
+        size="32"
+        density="comfortable"
+        class="mr-1"
+        rounded="lg"
+        title="Center content"
+        @click="centerContent"
+      ></v-btn>
+      <v-btn
+        icon="mdi:mdi-fit-to-screen-outline"
+        size="32"
+        density="comfortable"
+        class="mr-1"
+        rounded="lg"
+        title="Fit content to screen"
+        @click="fitContent"
+      >
+      </v-btn>
+      <v-btn
+        icon="mdi:mdi-cog"
+        size="32"
+        density="comfortable"
+        rounded="lg"
+        title="Settings"
+        :color="viewerStore.settingsOpen ? 'primary' : 'default'"
+        @click="viewerStore.settingsOpen = !viewerStore.settingsOpen"
+      ></v-btn>
+    </div>
+
+    <div
+      v-if="activeAddMode"
+      id="addModeBanner"
+      class="d-flex flex-column pl-3 pr-1 py-1 elevation-2 rounded-lg bg-surface"
+      style="
+        position: absolute;
+        z-index: 100;
+        top: 24px;
+        left: 50%;
+        transform: translateX(-50%);
+        max-width: calc(100% - 160px);
+      "
+    >
+      <div class="d-flex align-center ga-2">
+        <v-icon size="16" :icon="activeAddMode.icon" />
+        <span class="text-body-2 text-no-wrap">{{ activeAddMode.label }}</span>
+        <v-spacer />
+        <v-btn size="small" variant="text" color="error" density="comfortable" @click="cancelActiveMode">
+          {{ $t('dialogs.common.cancel') }}
+        </v-btn>
+      </div>
+
+      <!-- What the next placement gets; the mode stays open, so the options live with it -->
+      <div v-if="appStore.mouseMode === MouseMode.ADD_NODE" class="d-flex align-center ga-3">
+        <v-checkbox-btn v-model="addNodeBcs" :value="DofID.Dx" density="compact" label="Dx" class="flex-grow-0" />
+        <v-checkbox-btn v-model="addNodeBcs" :value="DofID.Dz" density="compact" label="Dz" class="flex-grow-0" />
+        <v-checkbox-btn v-model="addNodeBcs" :value="DofID.Ry" density="compact" label="Ry" class="flex-grow-0" />
+        <v-text-field
+          v-model="addNodeAngle"
+          :title="$t('nodes.lcsAngle')"
+          prefix="&alpha;"
+          suffix="°"
+          density="compact"
+          variant="plain"
+          hide-details
+          style="width: 54px"
+          class="flex-grow-0 add-node-angle"
+          @keydown="checkNumber($event)"
+        />
+      </div>
+
+      <div v-if="appStore.mouseMode === MouseMode.ADD_ELEMENT" class="d-flex align-center ga-3">
+        <v-checkbox-btn
+          v-model="addElementHinges[0]"
+          density="compact"
+          :label="$t('elements.hingeStart')"
+          class="flex-grow-0"
+        />
+        <v-checkbox-btn
+          v-model="addElementHinges[1]"
+          density="compact"
+          :label="$t('elements.hingeEnd')"
+          class="flex-grow-0"
+        />
+      </div>
+    </div>
+
+    <context-menu v-model:show="showCtxMenu" :options="optionsCtxMenu">
+      <context-menu-item
+        @click.ctrl="appStore.mouseMode = MouseMode.ADD_NODE"
+        @click.exact="openModal(AddNodeDialog, {})"
+      >
+        <template #icon>
+          <v-icon size="x-small">mdi-vector-point-plus</v-icon>
+        </template>
+        <template #label>
+          <span class="label">{{ $t('nodes.addNode') }}</span>
+          <span class="ml-auto text-right" style="font-size: 10px">Hold Ctrl to add using mouse</span>
+        </template>
+      </context-menu-item>
+      <context-menu-item
+        @click.ctrl="appStore.mouseMode = MouseMode.ADD_ELEMENT"
+        @click.exact="openModal(AddElementDialog, {})"
+      >
+        <template #icon>
+          <v-icon size="x-small">mdi-vector-polyline-plus</v-icon>
+        </template>
+        <template #label>
+          <span class="label">{{ $t('elements.addElement') }}</span>
+          <span class="ml-auto text-right" style="font-size: 10px">Hold Ctrl to add using mouse</span>
+        </template>
+      </context-menu-item>
+      <context-menu-item @click="appStore.mouseMode = MouseMode.ADD_DIMLINE">
+        <template #icon>
+          <v-icon size="x-small">mdi-arrow-expand-horizontal</v-icon>
+        </template>
+        <template #label>
+          <span class="label">{{ $t('dimensioning.add_dimension') }}</span>
+        </template>
+      </context-menu-item>
+      <!-- Opened over an element: its two end nodes already say where the dimension goes. -->
+      <context-menu-item v-if="ctxMenuElement" @click="addDimensionAlongElement()">
+        <template #icon>
+          <v-icon size="x-small">mdi-arrow-expand-horizontal</v-icon>
+        </template>
+        <template #label>
+          <span class="label">{{ $t('dimensioning.add_along_element', { label: ctxMenuElement.label }) }}</span>
+        </template>
+      </context-menu-item>
+      <context-menu-sperator />
+      <context-menu-item
+        :label="$t('common.edit')"
+        :disabled="!projectStore.isAnythingSelected2()"
+        @click="layoutStore.openWidget('Selection', Selection, {})"
+      >
+        <template #icon>
+          <v-icon size="x-small">mdi-pencil</v-icon>
+        </template>
+      </context-menu-item>
+      <context-menu-item
+        :disabled="!projectStore.isAnythingSelected2()"
+        @click="useClipboardStore().select(projectStore.selection2)"
+      >
+        <template #icon>
+          <v-icon size="x-small">mdi-content-copy</v-icon>
+        </template>
+        <template #label>
+          <span class="label">{{ $t('common.copy') }}</span>
+          <span class="ml-auto text-right" style="font-size: 10px">Ctrl + C</span>
+        </template>
+      </context-menu-item>
+      <context-menu-item :disabled="!useClipboardStore().isAnythingInClipboard()" @click="paste()">
+        <template #icon>
+          <v-icon size="x-small">mdi-content-copy</v-icon>
+        </template>
+        <template #label>
+          <span class="label">{{ $t('common.paste') }}</span>
+          <span class="ml-auto text-right" style="font-size: 10px">Ctrl + V</span>
+        </template>
+      </context-menu-item>
+      <context-menu-item
+        :label="$t('common.delete')"
+        :disabled="!projectStore.isAnythingSelected2()"
+        @click="
+          projectStore.deleteSelection2();
+          solve();
+        "
+      >
+        <template #icon>
+          <v-icon size="x-small">mdi-delete</v-icon>
+        </template>
+      </context-menu-item>
+    </context-menu>
+
+    <div ref="tooltip" class="tooltip body-2 black--text" style="display: none">
+      <div class="content"></div>
+    </div>
+
+    <div class="text-body-2 warning ga-1 d-flex flex-column pr-6">
+      <div style="width: fit-content">
+        <v-alert
+          v-if="hasSolveDiagnosticsIssues"
+          icon="$warning"
+          density="compact"
+          :type="hasBlockingSolveIssues ? 'error' : 'warning'"
+        >
+          <template #text>
+            <div class="d-flex align-center">
+              {{ solveDiagnosticsSummary }}
+              <v-btn variant="text" density="compact" size="small" @click="openSolveDiagnostics">Show details</v-btn>
+            </div>
+          </template>
+        </v-alert>
+      </div>
+      <div style="width: fit-content">
+        <v-alert v-if="projectStore.materials.length === 0" icon="$warning" density="compact" type="error">
+          <template #text>
+            <div class="d-flex align-center">
+              {{ $t('warnings.noMaterialsDefined') }}
+              <v-btn variant="text" density="compact" size="small" @click="openModal(AddMaterialDialog)">{{
+                $t('common.addNew')
+              }}</v-btn>
+            </div>
+          </template>
+        </v-alert>
+      </div>
+      <div style="width: fit-content">
+        <v-alert v-if="projectStore.crossSections.length === 0" icon="$warning" density="compact" type="error">
+          <template #text>
+            <div class="d-flex align-center">
+              {{ $t('warnings.noCrossSectionsDefined') }}
+              <v-btn variant="text" density="compact" size="small" @click="openModal(AddCrossSectionDialog)">
+                {{ $t('common.addNew') }}
+              </v-btn>
+            </div>
+          </template>
+        </v-alert>
+      </div>
+    </div>
+
+    <svg v-if="viewerStore.showGrid" class="w-100 fill-height" style="position: absolute">
+      <SvgGrid
+        ref="grid"
+        :svg="svg as SVGSVGElement"
+        :viewport="viewport as SVGGElement"
+        :zoom="scale"
+        :view-mode="appStore.inViewerMode"
+      />
+    </svg>
+
+    <SvgPanZoom
+      ref="panZoom"
+      :on-update="onUpdate"
+      :padding="16"
+      :mobile-padding="12"
+      :touch="appStore.mouseMode !== MouseMode.MOVING && appStore.mouseMode !== MouseMode.SELECTING"
+      :can-fit-content="projectStore.solver.domain.nodes.size >= 2"
+      :model-bounds="modelBounds"
+      fit-ignore="[data-fit-ignore]"
+      :fit-reserve="fitReserve"
+      center-after-fit
+      style="overflow: visible; z-index: 50; min-height: 0"
+    >
+      <svg
+        ref="svg"
+        :style="{
+          opacity: isFitted ? 1 : 0,
+          '--marker-force': markerForce,
+          '--marker-force-hover': markerForceHover,
+          '--marker-force-selected': markerForceSelected,
+          '--marker-centered': markerCentered,
+          '--marker-centered-hover': markerCenteredHover,
+          '--marker-moment-cw': markerMomentCw,
+          '--marker-moment-cw-hover': markerMomentCwHover,
+          '--marker-moment-cw-selected': markerMomentCwSelected,
+          '--marker-moment-ccw': markerMomentCcw,
+          '--marker-moment-ccw-hover': markerMomentCcwHover,
+          '--marker-moment-ccw-selected': markerMomentCcwSelected,
+          '--marker-rotation-cw': markerRotationCw,
+          '--marker-rotation-ccw': markerRotationCcw,
+          '--marker-rotation-cw-hover': markerRotationCwHover,
+          '--marker-rotation-cw-selected': markerRotationCwSelected,
+          '--marker-rotation-ccw-hover': markerRotationCcwHover,
+          '--marker-rotation-ccw-selected': markerRotationCcwSelected,
+          '--marker-reaction': markerReaction,
+          '--marker-moment-reaction-ccw': markerMomentReactionCcw,
+          '--marker-moment-reaction-cw': markerMomentReactionCw,
+          '--marker-dot': markerDot,
+          '--marker-dot-moving-x': markerDotMovingX,
+          '--marker-dot-torsion': markerDotTorsion,
+          '--marker-hinge-xy': markerHingeXY,
+          '--marker-hinge-x': markerHingeX,
+          '--marker-hinge-y': markerHingeY,
+          '--marker-force-tip': markerForceTip,
+          '--marker-force-tip-hover': markerForceTipHover,
+          '--marker-force-tip-selected': markerForceTipSelected,
+          '--marker-dim-tip': markerDimTip,
+          '--filter-text-label': markerTextLabel,
+          '--colors-loads': viewerStore.colors.loads,
+        }"
+        @click.right.prevent="openCtxMenu($event)"
+        @pointermove="mouseMove"
+        @pointerdown="onMouseDown"
+        @pointerup="onMouseUp"
+        @pointercancel="onPointerCancel"
+      >
+        <SvgViewerDefs
+          :id="props.id"
+          :colors="viewerStore.colors"
+          :support-size="viewerStore.supportSize"
+          :scale="scale"
+        />
+        <g ref="viewport" :class="{ disablePointerEvents: isZooming || isPanning }">
+          <!-- Where the next node lands and the line back to the last one; its own component
+               so that following the pointer does not render the drawing again. -->
+          <PlacingPreview :scale="scale" />
+          <g>
+            <g v-if="!isZooming && useViewerStore().showLoads" data-fit-ignore="loads">
+              <template v-for="(eload, index) in useProjectStore().solver.loadCases[0].elementLoadList">
+                <SVGElementLoad
+                  v-if="eload instanceof BeamElementUniformEdgeLoad || eload instanceof BeamElementTrapezoidalEdgeLoad"
+                  :key="`element-udl-${index}`"
+                  :class="{ selected: projectStore.selection2.elementLoads.includes(index) }"
+                  :data-element-load-id="index"
+                  :eload="eload"
+                  :scale="scale"
+                  :convert-force-distance="appStore.convertForceDistance"
+                  :font-size="viewerStore.fontSize"
+                  :number-format="appStore.numberFormatter"
+                  @mousemove="onElementLoadHover($event, eload)"
+                  @mouseleave="hideTooltip"
+                  @pointerup="onElementLoadClick($event, index)"
+                  @dblclick="
+                    openModal(EditElementLoadDialog, { index });
+                    projectStore.clearSelection();
+                  "
+                />
+                <SVGElementTemperatureLoad
+                  v-else-if="loadType(eload) === 'temperature'"
+                  :key="`element-temperature-${index}`"
+                  :class="{ selected: projectStore.selection2.elementLoads.includes(index) }"
+                  :data-element-load-id="index"
+                  :eload="eload"
+                  :scale="scale"
+                  :convert-force="appStore.convertForce"
+                  :font-size="viewerStore.fontSize"
+                  :number-format="appStore.numberFormatter"
+                  @mousemove="onElementLoadHover($event, eload)"
+                  @mouseleave="hideTooltip"
+                  @pointerup="onElementLoadClick($event, index)"
+                  @dblclick="
+                    openModal(EditElementLoadDialog, { index });
+                    projectStore.clearSelection();
+                  "
+                />
+                <SVGElementConcentratedLoad
+                  v-else-if="eload instanceof BeamConcentratedLoad"
+                  :key="`element-cl-${index}`"
+                  :class="{ selected: projectStore.selection2.elementLoads.includes(index) }"
+                  :data-element-load-id="index"
+                  :eload="eload"
+                  :scale="scale"
+                  :convert-force="appStore.convertForce"
+                  :convert-moment="appStore.convertMoment"
+                  :font-size="viewerStore.fontSize"
+                  :number-format="appStore.numberFormatter"
+                  @mousemove="onElementLoadHover($event, eload)"
+                  @mouseleave="hideTooltip"
+                  @pointerup="onElementLoadClick($event, index)"
+                  @dblclick="
+                    openModal(EditElementLoadDialog, { index });
+                    projectStore.clearSelection();
+                  "
+                />
+              </template>
+            </g>
+          </g>
+          <g ref="geometryLayer" class="elements-layer">
+            <SVGElement
+              v-for="(element, index) in projectStore.beams"
+              :key="`element-geometry-${index}`"
+              :class="{ selected: projectStore.selection2.elements.includes(element.label) }"
+              :show-geometry="true"
+              :show-results="false"
+              :element="element"
+              :scale="scale"
+              :show-deformed-shape="!isZooming && viewerStore.showDeformedShape"
+              :show-normal-force="!isZooming && viewerStore.showNormalForce"
+              :show-shear-force="!isZooming && viewerStore.showShearForce"
+              :show-bending-moment="!isZooming && viewerStore.showBendingMoment"
+              :show-label="!isZooming && viewerStore.showElementLabels"
+              :load-case="projectStore.solver.loadCases[0]"
+              :deformed-shape-multiplier="projectStore.defoScale * viewerStore.resultsScalePx_"
+              :normal-force-multiplier="projectStore.normalForceScale * viewerStore.resultsScalePx_"
+              :shear-force-multiplier="projectStore.shearForceScale * viewerStore.resultsScalePx_"
+              :bending-moment-multiplier="projectStore.bendingMomentScale * viewerStore.resultsScalePx_"
+              :result-label-mode="resolvedResultLabelMode"
+              :convert-force="appStore.convertForce"
+              :convert-moment="appStore.convertMoment"
+              :font-size="viewerStore.fontSize"
+              :number-format="appStore.numberFormatter"
+              @elementmousemove="onElementHover($event, element)"
+              @elementresultsmousemove="onElementHover($event, element, false)"
+              @mouseleave="hideTooltip"
+              @elementpointerup="onElementClick($event, element)"
+            />
+          </g>
+
+          <g ref="resultsLayer" class="elements-layer">
+            <SVGElement
+              v-for="(element, index) in projectStore.beams"
+              :key="`element-results-${index}`"
+              :class="{ selected: projectStore.selection2.elements.includes(element.label) }"
+              :show-geometry="false"
+              :show-results="true"
+              :element="element"
+              :scale="scale"
+              :show-deformed-shape="!isZooming && viewerStore.showDeformedShape"
+              :show-normal-force="!isZooming && viewerStore.showNormalForce"
+              :show-shear-force="!isZooming && viewerStore.showShearForce"
+              :show-bending-moment="!isZooming && viewerStore.showBendingMoment"
+              :show-label="!isZooming && viewerStore.showElementLabels"
+              :load-case="projectStore.solver.loadCases[0]"
+              :deformed-shape-multiplier="projectStore.defoScale * viewerStore.resultsScalePx_"
+              :normal-force-multiplier="projectStore.normalForceScale * viewerStore.resultsScalePx_"
+              :shear-force-multiplier="projectStore.shearForceScale * viewerStore.resultsScalePx_"
+              :bending-moment-multiplier="projectStore.bendingMomentScale * viewerStore.resultsScalePx_"
+              :result-label-mode="resolvedResultLabelMode"
+              :convert-force="appStore.convertForce"
+              :convert-moment="appStore.convertMoment"
+              :font-size="viewerStore.fontSize"
+              :number-format="appStore.numberFormatter"
+              @elementmousemove="onElementHover($event, element)"
+              @elementresultsmousemove="onElementHover($event, element, false)"
+              @mouseleave="hideTooltip"
+              @elementpointerup="onElementClick($event, element)"
+            />
+          </g>
+
+          <!--
+            Nodal loads sit above the elements so their handles win the hit test: a moment arc or a
+            prescribed displacement drawn along a beam would otherwise be swallowed by the beam's own
+            handle. Nodes still come last, so they keep priority over the loads attached to them.
+          -->
+          <g v-if="!isZooming && useViewerStore().showLoads" data-fit-ignore="loads">
+            <SVGNodalLoad
+              v-for="(nload, index) in useProjectStore().solver.loadCases[0].nodalLoadList"
+              :key="`nodal-load-${index}`"
+              :class="{ selected: projectStore.selection2.nodalLoads.includes(index) }"
+              :nload="nload"
+              :scale="scale"
+              :convert-force="appStore.convertForce"
+              :convert-moment="appStore.convertMoment"
+              :font-size="viewerStore.fontSize"
+              :number-format="appStore.numberFormatter"
+              @mousemove="onNodalLoadHover($event, nload)"
+              @mouseleave="hideTooltip"
+              @pointerup="onNodalLoadClick($event, index)"
+              @dblclick="
+                openModal(EditNodalLoadDialog, { index });
+                projectStore.clearSelection();
+              "
+            />
+            <SVGPrescribedDisplacement
+              v-for="(nload, index) in useProjectStore().solver.loadCases[0].prescribedBC"
+              :key="`prescribed-bc-${index}`"
+              :class="{ selected: projectStore.selection2.prescribedBC.includes(index) }"
+              :nload="nload"
+              :scale="scale"
+              :convert-length="appStore.convertLength"
+              :multiplier="projectStore.defoScale * viewerStore.resultsScalePx_"
+              :font-size="viewerStore.fontSize"
+              :number-format="appStore.numberFormatter"
+              @mousemove="onPrescribedBCHover($event, nload)"
+              @mouseleave="hideTooltip"
+              @pointerup="onPrescribedBCClick($event, index)"
+              @dblclick="
+                openModal(EditNodalLoadDialog, { index, type: 'displacement' });
+                projectStore.clearSelection();
+              "
+            />
+          </g>
+          <g class="nodes">
+            <SVGNode
+              v-for="(node, index) in projectStore.nodes"
+              :key="`node-${index}`"
+              :class="{ selected: projectStore.selection2.nodes.includes(node.label) }"
+              :node="node"
+              :scale="scale"
+              :show-label="!isZooming && viewerStore.showNodeLabels"
+              :show-supports="viewerStore.showSupports"
+              :show-deformed-shape="!isZooming && viewerStore.showDeformedShape"
+              :show-reactions="!isZooming && viewerStore.showReactions"
+              :convert-force="appStore.convertForce"
+              :convert-moment="appStore.convertMoment"
+              :load-case="projectStore.solver.loadCases[0]"
+              :multiplier="projectStore.defoScale * viewerStore.resultsScalePx_"
+              :font-size="viewerStore.fontSize"
+              :number-format="appStore.numberFormatter"
+              @nodemousemove="onNodeHover($event, node)"
+              @nodedefomousemove="onNodeHover($event, node)"
+              @nodepointerdown="onNodePress($event, node)"
+              @mouseleave="hideTooltip"
+              @nodepointerup="onNodeClick"
+            />
+          </g>
+          <g>
+            <SVGDimensioning
+              v-for="dim in normalizedDimensions"
+              :key="getDimensionId(dim)"
+              :points="getDimensionRenderableNodes(dim)!"
+              :distance="dim.distance"
+              :scale="scale"
+              :font-size="viewerStore.fontSize"
+              :number-format="appStore.numberFormatter"
+              :selected="projectStore.selection2.dimensions.includes(getDimensionId(dim))"
+              :show-points="projectStore.selection2.dimensions.includes(getDimensionId(dim))"
+              @dimensionpointerdown="onDimensionPointerDown($event, getDimensionId(dim))"
+              @dimensionpointerup="onDimensionPointerUp($event, getDimensionId(dim))"
+              @dimensionpointpointerdown="onDimensionPointPointerDown($event.event, getDimensionId(dim), $event.index)"
+              @dimensionpointpointerup="onDimensionPointPointerUp($event.event, getDimensionId(dim))"
+            />
+            <SVGDimensioning
+              v-if="previewDimensionPoints"
+              key="add-dimline"
+              :points="previewDimensionPoints"
+              :distance="previewDimensionDistance"
+              :scale="scale"
+              :font-size="viewerStore.fontSize"
+              :number-format="appStore.numberFormatter"
+              :show-points="true"
+              :interactive="false"
+            />
+          </g>
+          <!-- Currently hovered; drawn by its own component so the hover leaves the scene alone. -->
+          <HoveredElement :scale="scale" :is-zooming="isZooming" :result-label-mode="resolvedResultLabelMode" />
+          <!-- Paste preview -->
+          <g v-if="appStore.mouseMode === MouseMode.PASTE_CLIPBOARD" ref="pasteLayer">
+            <g>
+              <SVGElement
+                v-for="(element, index) in useClipboardStore().selection.elements"
+                :key="`element-${index}`"
+                :element="projectStore.solver.domain.elements.get(element) as Beam2D"
+                :scale="scale"
+                :show-deformed-shape="false"
+                :show-normal-force="false"
+                :show-shear-force="false"
+                :show-bending-moment="false"
+                :show-label="false"
+                :load-case="projectStore.solver.loadCases[0]"
+                :deformed-shape-multiplier="projectStore.defoScale * viewerStore.resultsScalePx_"
+                :normal-force-multiplier="projectStore.normalForceScale * viewerStore.resultsScalePx_"
+                :shear-force-multiplier="projectStore.shearForceScale * viewerStore.resultsScalePx_"
+                :bending-moment-multiplier="projectStore.bendingMomentScale * viewerStore.resultsScalePx_"
+                :result-label-mode="resolvedResultLabelMode"
+                :convert-force="appStore.convertForce"
+                :convert-moment="appStore.convertMoment"
+                :font-size="viewerStore.fontSize"
+                :number-format="appStore.numberFormatter"
+              />
+            </g>
+            <g class="nodes">
+              <SVGNode
+                v-for="(node, index) in useClipboardStore().selection.nodes"
+                :key="`node-${index}`"
+                :node="projectStore.solver.domain.nodes.get(node) as Node"
+                :scale="scale"
+                :show-label="false"
+                :show-supports="viewerStore.showSupports"
+                :show-deformed-shape="false"
+                :show-reactions="false"
+                :convert-force="appStore.convertForce"
+                :convert-moment="appStore.convertMoment"
+                :load-case="projectStore.solver.loadCases[0]"
+                :multiplier="projectStore.defoScale * viewerStore.resultsScalePx_"
+                :font-size="viewerStore.fontSize"
+                :number-format="appStore.numberFormatter"
+              />
+            </g>
+          </g>
+        </g>
+        <!-- The window being picked for an image export; on top of everything, in model units. -->
+        <WindowPickRect />
+      </svg>
+    </SvgPanZoom>
+
+    <SelectionBox />
+
+    <div
+      v-if="projectStore.selection.type !== null"
+      ref="selectionPanel"
+      class="selection-tooltip elevation-1"
+      :style="`position: absolute; left: ${projectStore.selection.x}px; top: ${projectStore.selection.y}px;`"
+    >
+      <!-- Aligned with the list rows below it, and no taller than the close button needs. -->
+      <div class="d-flex justify-space-between align-center pr-1 py-1">
+        <div class="font-weight-medium text-body-2 px-4">
+          {{ selectionTitle }}
+          <span v-if="['node', 'element'].includes(projectStore.selection.type)">{{
+            projectStore.selection.label
+          }}</span>
+        </div>
+        <v-btn
+          variant="text"
+          icon="mdi-close"
+          size="x-small"
+          density="comfortable"
+          @click="projectStore.selection.type = null"
+        />
+      </div>
+      <!-- What a mouse reads from the hover tooltip, and the only way to it on a touch screen. -->
+      <div v-if="selectionDetails" class="selection-details text-body-2 px-4 pb-2 pt-1">
+        <div v-if="selectionDetails.subtitle" class="font-weight-medium">{{ selectionDetails.subtitle }}</div>
+        <div v-if="selectionDetails.body" v-html="selectionDetails.body"></div>
+      </div>
+      <div>
+        <ContextMenuNode v-if="projectStore.selection.type === 'node'"></ContextMenuNode>
+        <ContextMenuElement v-if="projectStore.selection.type === 'element'"></ContextMenuElement>
+        <ContextMenuElementLoad v-if="projectStore.selection.type === 'element-load'"></ContextMenuElementLoad>
+        <ContextMenuNodalLoad
+          v-if="['nodal-load', 'prescribedbc-load'].includes(projectStore.selection.type)"
+        ></ContextMenuNodalLoad>
+        <ContextMenuDimension v-if="projectStore.selection.type === 'dimension'"></ContextMenuDimension>
+        <!-- <ContextMenuNodalLoad v-if="projectStore.selection.type === 'nodal-load'"></ContextMenuNodalLoad>
+        <ContextMenuElementLoad v-if="projectStore.selection.type === 'element-load'"></ContextMenuElementLoad> -->
+      </div>
+    </div>
+
+    <div v-if="viewerStore.settingsOpen" class="" style="position: absolute; right: 24px; top: 64px; z-index: 600">
+      <div id="viewerSettings" class="d-flex flex-sm-column pa-1 overflow-y-auto ga-2 align-end justify-end">
+        <div
+          color="grey-lighten-5"
+          rounded="lg"
+          class="d-sm-flex bg-grey-lighten-5 elevation-1 rounded"
+          style="width: fit-content"
+        >
+          <v-checkbox
+            v-model="useViewerStore().showDeformedShape"
+            :label="$t('sideSettings.showDeformedShape')"
+            hide-details
+            density="compact"
+            class="inline-checkbox mr-2 flex-shrink-0 text-no-wrap"
+          />
+          <v-checkbox
+            v-model="useViewerStore().showNormalForce"
+            label=""
+            hide-details
+            density="compact"
+            class="inline-checkbox mr-2 flex-shrink-0 text-no-wrap"
+            :disabled="useProjectStore().model === 'EigenValueDynamicSolver'"
+          >
+            <template #label>N (x)</template>
+          </v-checkbox>
+          <v-checkbox
+            v-model="useViewerStore().showShearForce"
+            label="Vz (x)"
+            hide-details
+            density="compact"
+            class="inline-checkbox mr-2 flex-shrink-0 text-no-wrap"
+            :disabled="useProjectStore().model === 'EigenValueDynamicSolver'"
+          >
+            <template #label>V<sub>z</sub>&nbsp;(x)</template>
+          </v-checkbox>
+          <v-checkbox
+            v-model="useViewerStore().showBendingMoment"
+            label="My (x)"
+            hide-details
+            density="compact"
+            class="inline-checkbox mr-2 flex-shrink-0 text-no-wrap"
+            :disabled="useProjectStore().model === 'EigenValueDynamicSolver'"
+          >
+            <template #label>M<sub>y</sub>&nbsp;(x)</template>
+          </v-checkbox>
+          <v-checkbox
+            v-model="useViewerStore().showReactions"
+            :label="$t('sideSettings.showReactions')"
+            hide-details
+            density="compact"
+            class="inline-checkbox mr-2 flex-shrink-0 text-no-wrap"
+          />
+        </div>
+
+        <div color="grey-lighten-5" rounded="lg" height="32" class="d-sm-flex bg-grey-lighten-5 elevation-1 rounded">
+          <v-checkbox
+            v-model="useViewerStore().showSupports"
+            :label="$t('sideSettings.supports')"
+            hide-details
+            density="compact"
+            class="inline-checkbox mr-2 flex-shrink-0 text-no-wrap"
+          />
+          <v-checkbox
+            v-model.number="useViewerStore().showLoads"
+            :label="$t('sideSettings.loads')"
+            dense
+            hide-details
+            density="compact"
+            class="inline-checkbox mr-2 flex-shrink-0 text-no-wrap"
+            :disabled="useProjectStore().model === 'EigenValueDynamicSolver'"
+          />
+
+          <v-checkbox
+            v-model="useViewerStore().showNodeLabels"
+            :label="$t('sideSettings.nodeLabels')"
+            hide-details
+            density="compact"
+            class="inline-checkbox mr-2 flex-shrink-0 text-no-wrap"
+          />
+          <v-checkbox
+            v-model="useViewerStore().showElementLabels"
+            :label="$t('sideSettings.elementLabels')"
+            hide-details
+            density="compact"
+            class="inline-checkbox mr-2 flex-shrink-0 text-no-wrap"
+          />
+        </div>
+      </div>
+      <div class="text-right text-sm-body-2 d-flex align-center justify-end">
+        <HelpTip topic="diagrams" location="bottom end" />
+        <button class="text-decoration-underline bg-white" @click="appStore.openSettings()">
+          {{ $t('sideSettings.more_settings') }}
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<style lang="scss" scoped>
+/*
+ * The plain variant reserves 8px above the text for a floating label this field does not use,
+ * which drops the angle below the Dx/Dz/Ry labels sitting next to it in the banner.
+ */
+.add-node-angle :deep(.v-field__input),
+.add-node-angle :deep(.v-text-field__prefix),
+.add-node-angle :deep(.v-text-field__suffix) {
+  padding-top: 0;
+}
+
+/* Keeps the number against its degree sign rather than adrift in the middle of the field. */
+.add-node-angle :deep(input) {
+  text-align: right;
+}
+
+/* Toggled from the script when an element is hovered; see the watch on `intersected`. */
+.elements-layer.dimmed {
+  opacity: 0.5 !important;
+}
+
+.disablePointerEvents {
+  pointer-events: none;
+}
+
+/* The read only properties sit above the actions the panel offers, divided from them. */
+.selection-details {
+  border-bottom: thin solid rgba(0, 0, 0, 0.12);
+  line-height: 1.5;
+}
+
+.svg-viewer :deep(*) {
+  .element-load.load-1d {
+    text {
+      fill: v-bind('viewerStore.colors.loads');
+    }
+
+    stroke-linecap: butt;
+
+    &:hover text {
+      //fill: blue;
+      font-weight: bold;
+    }
+
+    use {
+      stroke: v-bind('viewerStore.colors.loads');
+    }
+
+    use:hover {
+      stroke-width: 3px; /* affects the referenced element */
+    }
+
+    &:hover path.drawable,
+    &:hover polygon.drawable {
+      //stroke: blue;
+      stroke-width: 3px;
+    }
+
+    &:hover polyline {
+      marker-end: var(--marker-centered-hover);
+    }
+
+    polygon,
+    path {
+      stroke: v-bind('viewerStore.colors.loads');
+      stroke-width: 1px;
+
+      &.handle {
+        stroke-width: 20px;
+        stroke: transparent;
+      }
+    }
+
+    polyline {
+      marker-end: var(--marker-centered);
+    }
+
+    &.selected {
+      text {
+        fill: rgb(0, 55, 149);
+      }
+
+      polygon.drawable,
+      path.drawable {
+        stroke: rgb(0, 94, 255);
+        stroke-width: 4px;
+        stroke-linejoin: round;
+        fill: rgba(0, 55, 149, 0.15);
+      }
+
+      use {
+        stroke-width: 3px; /* affects the referenced element */
+        stroke: rgb(0, 94, 255);
+      }
+    }
+  }
+
+  .element.element-1d {
+    polyline {
+      fill: none;
+      stroke: black;
+      stroke-width: 2px;
+
+      &.handle {
+        cursor: pointer;
+        stroke-width: 24px;
+        stroke: transparent;
+      }
+
+      &.decoration {
+        stroke-width: 1px;
+      }
+    }
+
+    &:hover {
+      & polyline.drawable {
+        stroke: black;
+        stroke-width: 5px;
+      }
+    }
+
+    &.selected {
+      & polyline.drawable {
+        stroke: rgb(0, 94, 255);
+        stroke-width: 5px;
+      }
+    }
+
+    polyline.fibers {
+      stroke: #666;
+      stroke-width: 1px;
+    }
+
+    path.deformedShape {
+      fill: none;
+      stroke: v-bind('viewerStore.colors.deformedShape');
+      stroke-width: 2px;
+
+      &.decoration {
+        stroke-width: 1px;
+      }
+    }
+
+    .normal polyline {
+      stroke: v-bind('viewerStore.colors.normalForce');
+      stroke-width: 1px;
+      fill: v-bind('viewerStore.colors.normalForce');
+      fill-opacity: 0.1;
+
+      &:hover {
+        fill-opacity: 0.2;
+      }
+    }
+
+    .shear polyline {
+      stroke: v-bind('viewerStore.colors.shearForce');
+      stroke-width: 1px;
+      fill: v-bind('viewerStore.colors.shearForce');
+      fill-opacity: 0.1;
+
+      &:hover {
+        fill-opacity: 0.2;
+      }
+    }
+
+    .moment polyline {
+      stroke: v-bind('viewerStore.colors.bendingMoment');
+      stroke-width: 1px;
+      fill: v-bind('viewerStore.colors.bendingMoment');
+      fill-opacity: 0.1;
+
+      &:hover {
+        fill-opacity: 0.2;
+      }
+    }
+  }
+
+  .node {
+    polyline {
+      stroke: #000;
+      stroke-linecap: square;
+      stroke-width: 6px;
+      vector-effect: non-scaling-stroke;
+
+      &.handle {
+        cursor: pointer;
+        stroke-width: 24px;
+        stroke: transparent;
+      }
+
+      &.decoration {
+        stroke-width: 1px;
+        stroke: none;
+      }
+
+      &.drawable.deformed {
+        stroke: v-bind('viewerStore.colors.deformedShape');
+      }
+    }
+
+    &:hover polyline.drawable {
+      stroke: black;
+      stroke-width: 10px;
+    }
+
+    &.selected polyline.drawable {
+      stroke: rgb(0, 55, 149);
+      stroke-width: 8px;
+    }
+  }
+
+  .prescribed polyline {
+    stroke: v-bind('viewerStore.colors.loads');
+  }
+
+  .nodal-load {
+    text {
+      fill: v-bind('viewerStore.colors.loads');
+    }
+
+    polyline {
+      stroke-linecap: butt;
+      vector-effect: non-scaling-stroke;
+
+      &.decoration.force {
+        marker-end: var(--marker-force);
+      }
+
+      &.decoration.moment.cw {
+        marker-end: var(--marker-moment-cw);
+      }
+
+      &.decoration.moment.ccw {
+        marker-end: var(--marker-moment-ccw);
+      }
+
+      &.decoration.rotation.cw {
+        marker-end: var(--marker-rotation-cw);
+      }
+
+      &.decoration.rotation.ccw {
+        marker-end: var(--marker-rotation-ccw);
+      }
+
+      &.handle {
+        stroke: transparent;
+        stroke-width: 24px;
+      }
+
+      &.handle.moment {
+        stroke: transparent;
+        stroke-width: 38px;
+      }
+    }
+
+    &:hover text {
+      //fill: blue;
+      font-weight: bold;
+    }
+
+    &:hover polyline.decoration.force {
+      marker-end: var(--marker-force-hover);
+    }
+
+    &:hover polyline.decoration.moment.cw {
+      marker-end: var(--marker-moment-cw-hover);
+    }
+
+    &:hover polyline.decoration.moment.ccw {
+      marker-end: var(--marker-moment-ccw-hover);
+    }
+
+    &:hover polyline.decoration.rotation.cw {
+      marker-end: var(--marker-rotation-cw-hover);
+    }
+
+    &:hover polyline.decoration.rotation.ccw {
+      marker-end: var(--marker-rotation-ccw-hover);
+    }
+
+    /* The prescribed translation is a real line, so it gets the highlight the arrow markers give. */
+    &:hover polyline.decoration.marker-forceTip {
+      marker-end: var(--marker-force-tip-hover);
+      stroke-width: 2px;
+    }
+
+    &.selected polyline.decoration.force {
+      marker-end: var(--marker-force-selected);
+    }
+
+    &.selected polyline.decoration.moment.cw {
+      marker-end: var(--marker-moment-cw-selected);
+    }
+
+    &.selected polyline.decoration.moment.ccw {
+      marker-end: var(--marker-moment-ccw-selected);
+    }
+
+    &.selected polyline.decoration.rotation.cw {
+      marker-end: var(--marker-rotation-cw-selected);
+    }
+
+    &.selected polyline.decoration.rotation.ccw {
+      marker-end: var(--marker-rotation-ccw-selected);
+    }
+
+    &.selected polyline.decoration.marker-forceTip {
+      marker-end: var(--marker-force-tip-selected);
+      stroke: rgb(0, 55, 149);
+      stroke-width: 2px;
+    }
+
+    &.selected {
+      text {
+        fill: rgb(0, 55, 149);
+      }
+    }
+  }
+
+  .normal text {
+    fill: v-bind('viewerStore.colors.normalForce');
+  }
+
+  .shear text {
+    fill: v-bind('viewerStore.colors.shearForce');
+  }
+
+  .moment text {
+    fill: v-bind('viewerStore.colors.bendingMoment');
+  }
+
+  .reaction {
+    fill: v-bind('viewerStore.colors.reactions');
+  }
+
+  .marker-reaction {
+    marker-start: var(--marker-reaction);
+  }
+
+  .marker-moment_reaction_ccw {
+    marker-start: var(--marker-moment-reaction-ccw);
+  }
+
+  .marker-moment_reaction_cw {
+    marker-start: var(--marker-moment-reaction-cw);
+  }
+
+  .marker-dot {
+    marker-start: var(--marker-dot);
+  }
+
+  .marker-dot-moving-x {
+    marker-start: var(--marker-dot-moving-x);
+  }
+
+  .marker-dot-torsion {
+    marker-start: var(--marker-dot-torsion);
+  }
+
+  .marker-hinge-xy {
+    marker-start: var(--marker-hinge-xy);
+  }
+
+  .marker-hinge-x {
+    marker-start: var(--marker-hinge-x);
+  }
+
+  .marker-hinge-y {
+    marker-start: var(--marker-hinge-y);
+  }
+
+  .marker-forceTip {
+    marker-end: var(--marker-force-tip);
+  }
+
+  .marker-dimTip {
+    marker-start: var(--marker-dim-tip);
+    marker-end: var(--marker-dim-tip);
+  }
+
+  .filter-text-label {
+    filter: var(--filter-text-label);
+  }
+}
+
+/* Fingers are blunter than cursors: widen the invisible hit strokes and the floating controls. */
+@media (pointer: coarse) {
+  .svg-viewer :deep(*) {
+    .element-load.load-1d polygon.handle,
+    .element-load.load-1d path.handle,
+    .element.element-1d polyline.handle,
+    .node polyline.handle,
+    .nodal-load polyline.handle {
+      stroke-width: 32px;
+    }
+
+    .nodal-load polyline.handle.moment {
+      stroke-width: 44px;
+    }
+  }
+
+  /* size="32" lands as an inline style, so only !important can grow it. */
+  #undoRedo .v-btn,
+  #viewerControls .v-btn {
+    width: 40px !important;
+    height: 40px !important;
+  }
+}
+</style>

@@ -1,0 +1,208 @@
+{
+  "releases": [
+    {
+      "version": "1.2.0",
+      "title": "Touch, Speed & Vector Export",
+      "date": "September 22, 2026",
+      "highlights": [
+        "The editor now works with a finger: tap to place, press and hold for the menu, drag to pan, pinch to zoom.",
+        "A tap opens node, element and load properties, and buttons and tooltips grow under a finger.",
+        "Export the drawing as SVG - sharp at any size in Word, LaTeX or Inkscape.",
+        "New number format in Settings: scientific, engineering or automatic, with the decimal separator of your language.",
+        "Large models draw, select and scroll much faster.",
+        "Edit loads straight from the loads table, and set support angles, prescribed rotations and end hinges.",
+        "Fixes to unit conversions in loads, the settings dialog on a phone, and the update prompt."
+      ],
+      "tag": "Latest",
+      "contributors": [
+        {
+          "name": "kelidas",
+          "commits": 52,
+          "url": "https://github.com/kelidas"
+        },
+        {
+          "name": "Jan Vorisek",
+          "commits": 6,
+          "url": "https://github.com/janvorisek"
+        }
+      ]
+    },
+    {
+      "version": "1.1.1",
+      "title": "Solver Errors, Examples & Export",
+      "date": "August 31, 2026",
+      "highlights": [
+        "Models that cannot be solved now say why, naming the node and direction that moves.",
+        "New Examples gallery with ready-made models to open and explore.",
+        "Export the drawing as a PNG at any size, or copy it to the clipboard.",
+        "Export both result tables as CSV or copy them, in the units shown.",
+        "Help icons across the app link to the documentation in your language."
+      ],
+      "media": [
+        {
+          "src": "/changelog/media/examples-gallery.png",
+          "alt": "Examples gallery",
+          "caption": "Examples gallery"
+        },
+        {
+          "src": "/changelog/media/export-image.png",
+          "alt": "Export image dialog",
+          "caption": "Export image"
+        },
+        {
+          "src": "/changelog/media/export-results.png",
+          "alt": "Export CSV and copy buttons in the results table",
+          "caption": "Export results"
+        }
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "title": "Polygonal Cross Sections",
+      "date": "August 30, 2026",
+      "highlights": [
+        "New polygonal cross section editor: draw any shape, with holes, and A, Iy, Iz, Iyz, principal moments, radii of gyration and the ellipse of inertia are computed for you.",
+        "Presets for rectangle, I, T, L, channel, box, circle and pipe; drag vertices, insert or delete them, or type coordinates.",
+        "Shape thumbnails in the cross section table, element menu and selection panel.",
+        "Shapes are saved with the project and share links."
+      ],
+      "media": [
+        {
+          "src": "/changelog/media/polygonal-section-editor.png",
+          "alt": "Polygonal cross section editor",
+          "caption": "Polygonal cross section editor",
+          "size": "large"
+        }
+      ]
+    },
+    {
+      "version": "1.0.7",
+      "title": "Smarter Fit to Content & Stability Fixes",
+      "date": "August 29, 2026",
+      "highlights": [
+        "Fit to content is now precise in a single step: labels, load arrows, supports and result diagrams are all accounted for, so the whole structure fills the viewport without clipping or excess margin. Works for single beams too.",
+        "Editing a node or nodal load now respects the selected units - previously coordinates, moments and prescribed rotations could be scaled incorrectly when using mm or kN·m.",
+        "Projects with labels containing accented or non-Latin characters (e.g. Czech, Thai) are now saved and shared correctly instead of being lost on reload.",
+        "Undo/redo works reliably after deleting or restoring entities; edits to materials, cross-sections, supports, hinges and drags are all tracked in one consistent history.",
+        "Deleting a load from the Loads table removes the correct one even after sorting; prescribed displacements can now be selected independently of nodal loads.",
+        "The viewer no longer gets stuck after panning with the mouse button released outside the window.",
+        "Stricter input validation: non-positive E, G, A, Iy, h or k are rejected, zero-length elements can't be created, materials and cross-sections in use can't be deleted, and invalid share links or files no longer wipe the current project.",
+        "Small negative values are now shown in plain notation instead of exponential."
+      ],
+      "media": []
+    },
+    {
+      "version": "1.0.6",
+      "title": "Undo/Redo Rework",
+      "date": "May 21, 2026",
+      "highlights": [
+        "Undo and redo have been reworked to behave more consistently across the app.",
+        "Copy, paste, and delete operations should now be tracked properly and undo as expected."
+      ],
+      "media": []
+    },
+    {
+      "version": "1.0.5",
+      "title": "Element Concentrated Moment Loads",
+      "date": "May 20, 2026",
+      "highlights": [
+        "Added support for concentrated moment loads on beam elements.",
+        "Element load previews now show the concentrated moment symbol and value correctly.",
+        "Preview labels now respect the active force and moment units, including kN and derived moment units."
+      ],
+      "media": [
+        {
+          "src": "/changelog/media/element-concentrated-moment-load.png",
+          "alt": "Element concentrated moment load preview",
+          "caption": "Element concentrated moment load"
+        }
+      ]
+    },
+    {
+      "version": "1.0.4",
+      "title": "Free-Point Dimensioning",
+      "date": "March 19, 2026",
+      "highlights": [
+        "Dimensions can now start and end at any point on screen without creating unused FE nodes.",
+        "Dimension endpoints visibly show their snap points and can be dragged directly.",
+        "Endpoint snapping now works reliably during creation and dragging, including free points and node snaps.",
+        "Dimension context menu now supports reversing endpoint order and editing endpoint coordinates directly."
+      ],
+      "media": [
+        {
+          "src": "/changelog/media/freedimpoints.gif",
+          "alt": "Free-point dimensioning demo",
+          "caption": "Free-point dimensioning demo"
+        }
+      ]
+    },
+    {
+      "version": "1.0.3",
+      "title": "Linearly Variable Loads & Dimensions",
+      "date": "December 19, 2025",
+      "highlights": [
+        "Added support for linearly variable loads on elements.",
+        "Fixed the ability to add, delete, and select dimensions between nodes.",
+        "Dimensions can be moved with the mouse for better clarity."
+      ],
+      "media": [
+        {
+          "src": "/changelog/media/trapezoidal1.png",
+          "alt": "Linearly variable loads - triangular",
+          "caption": "Linearly variable loads - triangular"
+        },
+        {
+          "src": "/changelog/media/trapezoidal2.png",
+          "alt": "Linearly variable loads - trapezoidal",
+          "caption": "Linearly variable loads - trapezoidal"
+        },
+        {
+          "src": "/changelog/media/trapezoidal3.png",
+          "alt": "Linearly variable loads - positive and negative",
+          "caption": "Linearly variable loads - positive and negative"
+        },
+        {
+          "src": "/changelog/media/dimlines1.gif",
+          "alt": "Moving dimensions with mouse",
+          "caption": "Moving dimensions with mouse"
+        },
+        {
+          "src": "/changelog/media/dimlines2.gif",
+          "alt": "Moving dimensions with mouse",
+          "caption": "Moving dimensions with mouse"
+        }
+      ]
+    },
+    {
+      "version": "1.0.2",
+      "title": "Load stacking to improve visibility",
+      "date": "Dec 5, 2025",
+      "highlights": [
+        "Distributed loads now stack correctly when multiple placed on the same element.",
+        "Nodal loads in the same direction now stack on top of each other to improve visibility."
+      ],
+      "media": [
+        {
+          "src": "/changelog/media/stacked-loads.png",
+          "alt": "Stacking of nodal loads illustration",
+          "caption": "Stacked nodal loads"
+        },
+        {
+          "src": "/changelog/media/stacked-loads2.png",
+          "alt": "Stacking of distributed loads illustration",
+          "caption": "Stacked distributed loads"
+        }
+      ]
+    },
+    {
+      "version": "1.0.1",
+      "title": "Changelog",
+      "date": "Dec 4, 2025",
+      "highlights": [
+        "Changelog dialog now shows on app updates with useful release information.",
+        "Supports multiple languages based on user locale."
+      ],
+      "media": []
+    }
+  ]
+}
