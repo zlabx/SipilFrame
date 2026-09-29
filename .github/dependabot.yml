@@ -3,6 +3,7 @@ updates:
   - package-ecosystem: "npm"
     directory: "/"
     schedule:
-      interval: "daily"
-    open-pull-requests-limit: 32
-    target-branch: "dev"
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    # SipilFrame: repo ini memakai branch main (upstream memakai dev). Branch "upstream" adalah cermin, jangan disentuh.
+    target-branch: "main"

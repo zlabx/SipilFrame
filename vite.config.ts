@@ -30,6 +30,9 @@ const commitHash = execSync('git rev-parse HEAD').toString().trimEnd();
  */
 const base = process.env.VITE_BASE ?? '/';
 
+// SipilFrame: Sentry (upload source map) hanya aktif bila SENTRY_AUTH_TOKEN, SENTRY_ORG, dan SENTRY_PROJECT semuanya di-set.
+const sentryEnabled = Boolean(process.env.SENTRY_AUTH_TOKEN && process.env.SENTRY_ORG && process.env.SENTRY_PROJECT);
+
 export default defineConfig({
   base,
   plugins: [
@@ -86,10 +89,8 @@ export default defineConfig({
         ],
       },
     }),
-    sentryVitePlugin({
-      org: 'ctu-prague',
-      project: 'edubeam-app',
-    }),
+    // SipilFrame: upload source map hanya jika kredensial Sentry milik sendiri di-set (upstream meng-hardcode org/project mereka).
+    ...(sentryEnabled ? [sentryVitePlugin({ org: process.env.SENTRY_ORG, project: process.env.SENTRY_PROJECT })] : []),
   ],
 
   define: {
@@ -123,6 +124,7 @@ export default defineConfig({
      * halves of that want: Sentry can still name a line of the source, and no one else goes looking
      * for a file that was never meant to be public.
      */
-    sourcemap: 'hidden',
+    // SipilFrame: tanpa Sentry tidak ada yang memakai source map, jadi tidak perlu dibuat.
+    sourcemap: sentryEnabled ? 'hidden' : false,
   },
 });

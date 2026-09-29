@@ -22,7 +22,7 @@ SipilFrame adalah turunan (derivative work) dari **[EduBeam](https://github.com/
 ## Status
 
 - Basis saat ini: **EduBeam v1.2.0**, upstream commit [`ac56926`](https://github.com/janvorisek/edubeam/commit/ac56926) (27 Sep 2026).
-- **Belum ada modifikasi kode.** Isi repo ini masih identik dengan upstream, selain `README.md` ini.
+- Modifikasi kode baru sebatas **penonaktifan telemetri upstream** (Sentry) dan konfigurasi dependabot; lihat [Perubahan dari upstream](#perubahan-dari-upstream). Solver dan antarmuka belum diubah.
 - **Belum dideploy.** Baca [Checklist sebelum deploy](#checklist-sebelum-deploy) dulu.
 
 ## Fitur (dari EduBeam)
@@ -91,19 +91,30 @@ Kalau `README.md` konflik saat merge (upstream ikut mengubahnya), pertahankan ve
 
 ## Perubahan dari upstream
 
-Belum ada. Catat setiap perubahan di sini agar mudah ditinjau saat merge.
+Catat setiap perubahan di sini agar mudah ditinjau saat merge.
+
+| File | Perubahan | Alasan |
+|---|---|---|
+| `src/main.ts` | DSN Sentry upstream dihapus; `Sentry.init` hanya jalan bila `VITE_SENTRY_DSN` di-set | Mencegah error dan session replay pengguna terkirim ke proyek Sentry pihak lain |
+| `vite.config.ts` | `sentryVitePlugin` hanya aktif bila `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` di-set; `sourcemap` jadi `false` bila plugin mati | Upstream meng-hardcode org/project miliknya |
+| `.github/dependabot.yml` | Target `main` (bukan `dev`), mingguan, maksimal 5 PR | Branch `dev` tidak ada di repo ini |
+| `.env.example` (baru) | Dokumentasi variabel lingkungan | — |
+| `README.md` | Diganti | Atribusi dan panduan SipilFrame |
+
+Hasil build tanpa env apa pun sudah diverifikasi: tidak ada DSN atau host Sentry di `dist/`, tidak ada source map, dan library Sentry ikut ter-tree-shake. Dengan `VITE_SENTRY_DSN` di-set, Sentry aktif kembali dengan DSN tersebut.
 
 ## Checklist sebelum deploy
 
-Temuan dari audit awal — **jangan dideploy ke sipilstock.com sebelum ini beres**:
+Hasil audit awal. Yang sudah dikerjakan ditandai centang.
 
-- [ ] **Sentry.** `src/main.ts` menginisialisasi Sentry dengan **DSN milik upstream** pada build produksi, dengan session replay (`maskAllText: false`) dan `tracesSampleRate: 1.0`. Jika dideploy apa adanya, laporan error dan rekaman sesi pengguna SipilStock akan terkirim ke proyek Sentry milik upstream. Nonaktifkan, atau ganti dengan DSN milik sendiri yang dibaca dari env var, dan perbarui Kebijakan Privasi bila memakai analytics/monitoring.
-- [ ] **`sentryVitePlugin`** di `vite.config.ts` (org/project upstream). Hapus atau nonaktifkan agar build tidak mencoba mengunggah source map ke proyek upstream.
-- [ ] **Google Analytics.** Hanya aktif jika `VITE_GANALYTICS_TAG_ID` diisi. Biarkan kosong kecuali memang dipakai.
-- [ ] **`.github/dependabot.yml`** menargetkan branch `dev` yang tidak ada di repo ini (bisa memicu PR bertumpuk / error). Sesuaikan target atau nonaktifkan.
-- [ ] **`.github/FUNDING.yml`** masih menunjuk ke sponsor upstream. Biarkan jika ingin mengarahkan dukungan ke penulis asli, atau ganti.
+- [x] **Sentry milik upstream** dinonaktifkan (lihat tabel di atas). Kalau nanti ingin memakai monitoring sendiri, isi `VITE_SENTRY_DSN` dengan DSN proyek sendiri, dan **pertimbangkan** mengubah `maskAllText: false` dan `blockAllMedia: false` pada session replay di `src/main.ts` menjadi `true`. Perbarui Kebijakan Privasi SipilStock bila monitoring diaktifkan.
+- [x] **`sentryVitePlugin`** tidak lagi menunjuk ke org/project upstream.
+- [x] **`.github/dependabot.yml`** disesuaikan ke branch `main`.
+- [x] **Google Analytics** hanya aktif jika `VITE_GANALYTICS_TAG_ID` diisi; biarkan kosong kecuali memang dipakai.
+- [ ] **Google Fonts.** Font Roboto (`src/plugins/webfontloader.ts`) serta Barlow dan Lobster (`src/assets/main.scss`) dimuat dari server Google saat runtime, jadi IP pengguna terkirim ke Google. Pertimbangkan self-host (`@fontsource/barlow` dan `roboto-fontface` sudah ada di dependensi) atau sebutkan di Kebijakan Privasi.
 - [ ] **Halaman "Tentang/Lisensi"** di dalam aplikasi: sebut EduBeam oleh Jan Vorisek, lisensi GPL-3.0, dan tautan ke repo ini.
-- [ ] Ganti branding dan tautan (`README`, judul halaman, ikon PWA, `https://edubeam.app`, `run.edubeam.app`) sesuai kebutuhan, dan tetap sertakan atribusi.
+- [ ] **Branding dan tautan** (judul halaman, ikon PWA, tombol ke `https://edubeam.app`, `run.edubeam.app`) disesuaikan bila perlu, tetap dengan atribusi.
+- [ ] **`.github/FUNDING.yml`** masih menunjuk ke sponsor upstream. Sengaja dibiarkan agar dukungan mengalir ke penulis asli; ganti bila tidak diinginkan.
 
 ## Integrasi dengan SipilStock
 
