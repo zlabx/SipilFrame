@@ -4,6 +4,8 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-    open-pull-requests-limit: 5
-    # SipilFrame: repo ini memakai branch main (upstream memakai dev). Branch "upstream" adalah cermin, jangan disentuh.
+    # SipilFrame: pembaruan versi dimatikan (limit 0) supaya package-lock.json tetap dekat dengan upstream
+    # EduBeam dan merge dari upstream tidak konflik. Dependabot security updates tidak terpengaruh.
+    # Naikkan dependensi lewat merge dari branch "upstream". Branch "upstream" adalah cermin, jangan disentuh.
+    open-pull-requests-limit: 0
     target-branch: "main"

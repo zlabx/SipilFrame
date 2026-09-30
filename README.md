@@ -98,7 +98,7 @@ Catat setiap perubahan di sini agar mudah ditinjau saat merge.
 |---|---|---|
 | `src/main.ts` | DSN Sentry upstream dihapus; `Sentry.init` hanya jalan bila `VITE_SENTRY_DSN` di-set | Mencegah error dan session replay pengguna terkirim ke proyek Sentry pihak lain |
 | `vite.config.ts` | `sentryVitePlugin` hanya aktif bila `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` di-set; `sourcemap` jadi `false` bila plugin mati | Upstream meng-hardcode org/project miliknya |
-| `.github/dependabot.yml` | Target `main` (bukan `dev`), mingguan, maksimal 5 PR | Branch `dev` tidak ada di repo ini |
+| `.github/dependabot.yml` | Target `main` (bukan `dev`); pembaruan versi dimatikan (`open-pull-requests-limit: 0`), notifikasi keamanan tetap jalan | Branch `dev` tidak ada di repo ini; PR upgrade dependensi membuat `package-lock.json` menyimpang dari upstream sehingga merge EduBeam rawan konflik |
 | `.env.example` (baru) | Dokumentasi variabel lingkungan | — |
 | `src/plugins/webfontloader.ts` | Font Barlow, Roboto, dan Lobster di-self-host lewat `@fontsource` (subset latin + latin-ext); `loadFonts()` dibiarkan kosong agar `plugins/index.ts` upstream tidak berubah | Tidak ada request ke Google Fonts, jadi IP pengguna tidak terkirim ke Google |
 | `src/assets/main.scss` | Baris `@import` Google Fonts dihapus | Idem |
@@ -116,7 +116,7 @@ Hasil audit awal. Yang sudah dikerjakan ditandai centang.
 
 - [x] **Sentry milik upstream** dinonaktifkan (lihat tabel di atas). Kalau nanti ingin memakai monitoring sendiri, isi `VITE_SENTRY_DSN` dengan DSN proyek sendiri, dan **pertimbangkan** mengubah `maskAllText: false` dan `blockAllMedia: false` pada session replay di `src/main.ts` menjadi `true`. Perbarui Kebijakan Privasi SipilStock bila monitoring diaktifkan.
 - [x] **`sentryVitePlugin`** tidak lagi menunjuk ke org/project upstream.
-- [x] **`.github/dependabot.yml`** disesuaikan ke branch `main`.
+- [x] **`.github/dependabot.yml`** disesuaikan ke branch `main`, dan pembaruan versi dimatikan. Dependensi dinaikkan lewat merge dari upstream; kerentanan keamanan tetap dilaporkan Dependabot.
 - [x] **Google Analytics** hanya aktif jika `VITE_GANALYTICS_TAG_ID` diisi; biarkan kosong kecuali memang dipakai.
 - [x] **Google Fonts** di-self-host (lihat tabel di atas). Sekarang tidak ada request ke pihak ketiga, sehingga tidak perlu menyebut Google di Kebijakan Privasi.
 - [x] **Atribusi dan source.** Tombol GitHub di aplikasi menunjuk ke repo ini, yang README-nya memuat atribusi EduBeam (Jan Vorisek, GPL-3.0). Tautan "Documentation" tetap ke dokumentasi asli (`edubeam.app`).
