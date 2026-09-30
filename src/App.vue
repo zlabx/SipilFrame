@@ -443,7 +443,7 @@ const app_commit = APP_COMMIT;
         <v-icon class="ml-1">mdi-open-in-new</v-icon>
       </v-btn>
 
-      <v-btn class="d-none d-sm-inline-flex" icon href="https://github.com/janvorisek/edubeam" target="_blank">
+      <v-btn class="d-none d-sm-inline-flex" icon href="https://github.com/zlabx/SipilFrame" target="_blank">
         <v-icon>mdi-github</v-icon>
       </v-btn>
     </v-app-bar>

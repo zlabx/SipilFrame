@@ -22,8 +22,9 @@ SipilFrame adalah turunan (derivative work) dari **[EduBeam](https://github.com/
 ## Status
 
 - Basis saat ini: **EduBeam v1.2.0**, upstream commit [`ac56926`](https://github.com/janvorisek/edubeam/commit/ac56926) (27 Sep 2026).
-- Modifikasi kode baru sebatas **penonaktifan telemetri upstream** (Sentry) dan konfigurasi dependabot; lihat [Perubahan dari upstream](#perubahan-dari-upstream). Solver dan antarmuka belum diubah.
-- **Belum dideploy.** Baca [Checklist sebelum deploy](#checklist-sebelum-deploy) dulu.
+- Modifikasi kode sebatas **penonaktifan telemetri upstream** (Sentry), **self-host font** (tanpa Google Fonts), dan satu tautan GitHub; lihat [Perubahan dari upstream](#perubahan-dari-upstream). Solver dan antarmuka tidak diubah; nama dan logo "edubeam" di dalam aplikasi sengaja dibiarkan apa adanya.
+- Rilis pertama: tag **`v1.2.0-sf.1`** (dipakai repo utama untuk mengunci versi build).
+- **Belum dideploy.** Sisa pekerjaan ada di [Checklist sebelum deploy](#checklist-sebelum-deploy) dan [Integrasi dengan SipilStock](#integrasi-dengan-sipilstock).
 
 ## Fitur (dari EduBeam)
 
@@ -99,9 +100,15 @@ Catat setiap perubahan di sini agar mudah ditinjau saat merge.
 | `vite.config.ts` | `sentryVitePlugin` hanya aktif bila `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, `SENTRY_PROJECT` di-set; `sourcemap` jadi `false` bila plugin mati | Upstream meng-hardcode org/project miliknya |
 | `.github/dependabot.yml` | Target `main` (bukan `dev`), mingguan, maksimal 5 PR | Branch `dev` tidak ada di repo ini |
 | `.env.example` (baru) | Dokumentasi variabel lingkungan | — |
+| `src/plugins/webfontloader.ts` | Font Barlow, Roboto, dan Lobster di-self-host lewat `@fontsource` (subset latin + latin-ext); `loadFonts()` dibiarkan kosong agar `plugins/index.ts` upstream tidak berubah | Tidak ada request ke Google Fonts, jadi IP pengguna tidak terkirim ke Google |
+| `src/assets/main.scss` | Baris `@import` Google Fonts dihapus | Idem |
+| `package.json`, `package-lock.json` | Tambah `@fontsource/lobster` dan `@fontsource/roboto` (lockfile hanya menambah 2 entri, tanpa mengubah entri lain) | Sumber font lokal |
+| `src/App.vue` | Tombol GitHub di app bar menunjuk ke repo ini, bukan repo upstream | Source yang disajikan ada di repo ini; atribusi ke EduBeam ada di README |
 | `README.md` | Diganti | Atribusi dan panduan SipilFrame |
 
 Hasil build tanpa env apa pun sudah diverifikasi: tidak ada DSN atau host Sentry di `dist/`, tidak ada source map, dan library Sentry ikut ter-tree-shake. Dengan `VITE_SENTRY_DSN` di-set, Sentry aktif kembali dengan DSN tersebut.
+
+Verifikasi runtime (Chromium headless, build `/sipilframe/`): aplikasi hanya menghubungi host asalnya sendiri (nol request ke domain lain), font Barlow dan Lobster termuat dari file lokal, dan model contoh langsung terhitung. Subset cyrillic, greek, dan vietnamese tidak disertakan; teks di luar latin/latin-ext memakai font sans-serif sistem.
 
 ## Checklist sebelum deploy
 
@@ -111,14 +118,14 @@ Hasil audit awal. Yang sudah dikerjakan ditandai centang.
 - [x] **`sentryVitePlugin`** tidak lagi menunjuk ke org/project upstream.
 - [x] **`.github/dependabot.yml`** disesuaikan ke branch `main`.
 - [x] **Google Analytics** hanya aktif jika `VITE_GANALYTICS_TAG_ID` diisi; biarkan kosong kecuali memang dipakai.
-- [ ] **Google Fonts.** Font Roboto (`src/plugins/webfontloader.ts`) serta Barlow dan Lobster (`src/assets/main.scss`) dimuat dari server Google saat runtime, jadi IP pengguna terkirim ke Google. Pertimbangkan self-host (`@fontsource/barlow` dan `roboto-fontface` sudah ada di dependensi) atau sebutkan di Kebijakan Privasi.
-- [ ] **Halaman "Tentang/Lisensi"** di dalam aplikasi: sebut EduBeam oleh Jan Vorisek, lisensi GPL-3.0, dan tautan ke repo ini.
-- [ ] **Branding dan tautan** (judul halaman, ikon PWA, tombol ke `https://edubeam.app`, `run.edubeam.app`) disesuaikan bila perlu, tetap dengan atribusi.
+- [x] **Google Fonts** di-self-host (lihat tabel di atas). Sekarang tidak ada request ke pihak ketiga, sehingga tidak perlu menyebut Google di Kebijakan Privasi.
+- [x] **Atribusi dan source.** Tombol GitHub di aplikasi menunjuk ke repo ini, yang README-nya memuat atribusi EduBeam (Jan Vorisek, GPL-3.0). Tautan "Documentation" tetap ke dokumentasi asli (`edubeam.app`).
+- [x] **Branding "edubeam"** di dalam aplikasi sengaja tidak diubah (keputusan: apa adanya).
 - [ ] **`.github/FUNDING.yml`** masih menunjuk ke sponsor upstream. Sengaja dibiarkan agar dukungan mengalir ke penulis asli; ganti bila tidak diinginkan.
 
 ## Integrasi dengan SipilStock
 
-Direncanakan: repo utama [`zlabx/zlabx`](https://github.com/zlabx/zlabx) (privat) akan meng-clone repo ini saat build Cloudflare Pages, menjalankan `VITE_BASE=/sipilframe/ npm run build`, lalu menyalin `dist/` ke `sipilframe/`, dengan pola yang sama seperti SipilCAD. Karena repo ini publik, tidak diperlukan token untuk clone.
+Direncanakan: repo utama [`zlabx/zlabx`](https://github.com/zlabx/zlabx) (privat) akan meng-clone repo ini pada **tag tertentu** (mis. `v1.2.0-sf.1`, bukan `main`) saat build Cloudflare Pages, menjalankan `VITE_BASE=/sipilframe/ npm run build`, lalu menyalin `dist/` ke `sipilframe/`, dengan pola yang sama seperti SipilCAD. Karena repo ini publik, tidak diperlukan token untuk clone.
 
 ## Lisensi
 
