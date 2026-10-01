@@ -282,11 +282,31 @@ const getLocaleFallbacks = (value: string) => {
   return Array.from(unique).filter(Boolean);
 };
 
+/**
+ * SipilFrame: aplikasi disajikan dari subfolder (VITE_BASE=/sipilframe/), jadi path absolut dari root
+ * ("/changelog/...") harus diberi base. Tidak berefek bila base-nya "/", dan aman dipanggil dua kali.
+ */
+const withBase = (path: string) => {
+  const base = import.meta.env.BASE_URL.replace(/\/$/, '');
+  if (!base || !path.startsWith('/') || path.startsWith('//')) return path;
+  return path === base || path.startsWith(`${base}/`) ? path : `${base}${path}`;
+};
+
+/** Gambar/video di dalam changelog ditulis sebagai "/changelog/media/...": ikut diberi base. */
+const rebaseMedia = (data: ChangelogData): ChangelogData => {
+  data.releases?.forEach((release) =>
+    release.media?.forEach((entry) => {
+      entry.src = withBase(entry.src);
+    })
+  );
+  return data;
+};
+
 const fetchDataset = async (code: string): Promise<ChangelogData | null> => {
   try {
-    const response = await fetch(`/changelog/${code}.json`, { cache: 'no-cache' });
+    const response = await fetch(withBase(`/changelog/${code}.json`), { cache: 'no-cache' });
     if (!response.ok) return null;
-    return (await response.json()) as ChangelogData;
+    return rebaseMedia((await response.json()) as ChangelogData);
   } catch (err) {
     console.warn('Failed to load changelog for locale', code, err);
     return null;

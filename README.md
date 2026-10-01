@@ -23,7 +23,7 @@ SipilFrame adalah turunan (derivative work) dari **[EduBeam](https://github.com/
 
 - Basis saat ini: **EduBeam v1.2.0**, upstream commit [`ac56926`](https://github.com/janvorisek/edubeam/commit/ac56926) (27 Sep 2026).
 - Modifikasi kode sebatas **penonaktifan telemetri upstream** (Sentry), **self-host font** (tanpa Google Fonts), dan satu tautan GitHub; lihat [Perubahan dari upstream](#perubahan-dari-upstream). Solver dan antarmuka tidak diubah; nama dan logo "edubeam" di dalam aplikasi sengaja dibiarkan apa adanya.
-- Rilis pertama: tag **`v1.2.0-sf.1`** (dipakai repo utama untuk mengunci versi build).
+- Rilis: **`v1.2.0-sf.1`** (pertama) dan **`v1.2.0-sf.2`** (perbaikan dialog "What's New" saat disajikan dari subfolder). Repo utama mengunci versi build ke salah satu tag ini.
 - **Belum dideploy.** Sisa pekerjaan ada di [Checklist sebelum deploy](#checklist-sebelum-deploy) dan [Integrasi dengan SipilStock](#integrasi-dengan-sipilstock).
 
 ## Fitur (dari EduBeam)
@@ -86,6 +86,7 @@ Kalau `README.md` konflik saat merge (upstream ikut mengubahnya), pertahankan ve
 ### Aturan supaya update tetap murah
 
 - Batasi perubahan di `main`: branding, konfigurasi, dan tautan ke SipilStock. Hindari refactor.
+- Setelah merge dari upstream, cari path absolut baru yang tidak memperhitungkan subfolder: `grep -rnE "fetch\(\s*[`'\"]/" src` dan cek `src="/..."` / `url(/...)`. Aplikasi ini disajikan dari `/sipilframe/`, jadi path berawalan `/` harus lewat `import.meta.env.BASE_URL` (lihat `Changelog.vue`).
 - Jangan menghapus file upstream yang tidak dipakai (mis. `docs/`); menghapusnya memicu konflik merge di kemudian hari. Cukup jangan di-build.
 - Tambahan besar (mis. terjemahan Indonesia) sebaiknya dikirim juga sebagai PR ke upstream agar tidak perlu dirawat sendiri.
 - Untuk deploy, kunci ke tag atau commit `main` tertentu, jangan ke `HEAD`, supaya merge upstream yang bermasalah tidak langsung naik ke produksi.
@@ -104,6 +105,7 @@ Catat setiap perubahan di sini agar mudah ditinjau saat merge.
 | `src/assets/main.scss` | Baris `@import` Google Fonts dihapus | Idem |
 | `package.json`, `package-lock.json` | Tambah `@fontsource/lobster` dan `@fontsource/roboto` (lockfile hanya menambah 2 entri, tanpa mengubah entri lain) | Sumber font lokal |
 | `src/App.vue` | Tombol GitHub di app bar menunjuk ke repo ini, bukan repo upstream | Source yang disajikan ada di repo ini; atribusi ke EduBeam ada di README |
+| `src/components/dialogs/Changelog.vue` | Path `/changelog/...` (JSON dan gambar/video di dalamnya) diberi `import.meta.env.BASE_URL`; tidak berefek bila base `/` | Dari subfolder `/sipilframe/`, path absolut menunjuk ke root situs sehingga dialog "What's New" menampilkan "Missing base changelog" dan gambarnya rusak |
 | `README.md` | Diganti | Atribusi dan panduan SipilFrame |
 
 Hasil build tanpa env apa pun sudah diverifikasi: tidak ada DSN atau host Sentry di `dist/`, tidak ada source map, dan library Sentry ikut ter-tree-shake. Dengan `VITE_SENTRY_DSN` di-set, Sentry aktif kembali dengan DSN tersebut.
