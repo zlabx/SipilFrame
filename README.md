@@ -24,7 +24,8 @@ SipilFrame adalah turunan (derivative work) dari **[EduBeam](https://github.com/
 - Basis saat ini: **EduBeam v1.2.0**, upstream commit [`ac56926`](https://github.com/janvorisek/edubeam/commit/ac56926) (27 Sep 2026).
 - Modifikasi kode sebatas **penonaktifan telemetri upstream** (Sentry), **self-host font** (tanpa Google Fonts), dan satu tautan GitHub; lihat [Perubahan dari upstream](#perubahan-dari-upstream). Solver dan antarmuka tidak diubah; nama dan logo "edubeam" di dalam aplikasi sengaja dibiarkan apa adanya.
 - Rilis: **`v1.2.0-sf.1`** (pertama) dan **`v1.2.0-sf.2`** (perbaikan dialog "What's New" saat disajikan dari subfolder). Repo utama mengunci versi build ke salah satu tag ini.
-- **Belum dideploy.** Sisa pekerjaan ada di [Checklist sebelum deploy](#checklist-sebelum-deploy) dan [Integrasi dengan SipilStock](#integrasi-dengan-sipilstock).
+- **Sudah live** di <https://sipilstock.com/sipilframe/>. Versi yang tayang selalu sama dengan `SIPILFRAME_REF` di repo utama dan terlihat di `/sipilframe/SOURCE.txt`; cara menaikkannya ada di [Cara rilis](#cara-rilis-naik-versi-di-produksi).
+- Item [checklist](#checklist-sebelum-deploy) yang tersisa hanya `FUNDING.yml` (sengaja dibiarkan).
 
 ## Fitur (dari EduBeam)
 
@@ -91,6 +92,30 @@ Kalau `README.md` konflik saat merge (upstream ikut mengubahnya), pertahankan ve
 - Tambahan besar (mis. terjemahan Indonesia) sebaiknya dikirim juga sebagai PR ke upstream agar tidak perlu dirawat sendiri.
 - Untuk deploy, kunci ke tag atau commit `main` tertentu, jangan ke `HEAD`, supaya merge upstream yang bermasalah tidak langsung naik ke produksi.
 
+## Cara rilis (naik versi di produksi)
+
+Produksi **tidak mengikuti `main`** repo ini. Repo utama ([`zlabx/zlabx`](https://github.com/zlabx/zlabx)) meng-clone **tag tertentu**, dan Cloudflare Pages tidak terhubung ke repo ini. Jadi push ke sini tidak mengubah situs; perubahan baru tayang setelah **tag dibuat** *dan* **repo utama dinaikkan**. Ini berlaku sama untuk perbaikan bug, perubahan kecil, fitur, maupun merge dari upstream.
+
+1. **Kerjakan di `main`** dan uji: `npm run test:run`, `npm run lint`, lalu build untuk subfolder (`VITE_BASE=/sipilframe/ npm run build`). Beberapa perubahan boleh dikumpulkan; satu tag cukup untuk semuanya.
+2. **Perbarui README ini**: baris "Rilis" di bagian [Status](#status) dan tabel [Perubahan dari upstream](#perubahan-dari-upstream).
+3. **Buat dan push tag baru:**
+   ```bash
+   git tag -a v1.2.0-sf.3 -m "Ringkasan perubahan"
+   git push origin main v1.2.0-sf.3
+   ```
+4. **Naikkan repo utama:** `git pull` di `zlabx/zlabx`, ganti nilai bawaan `SIPILFRAME_REF` di `scripts/build-sipilframe.sh` ke tag baru, lalu push ke `main`. Push inilah yang memicu deploy produksi (sekitar 1–1,5 menit).
+5. **Cek hasilnya:** `https://sipilstock.com/sipilframe/SOURCE.txt` harus menyebut tag dan commit baru. Buka lewat konsol (`fetch('/sipilframe/SOURCE.txt').then(r=>r.text()).then(console.log)`) atau jendela private, karena service worker PWA bisa menjawab navigasi langsung dengan halaman aplikasi.
+
+**Penamaan tag:** `v<versi EduBeam basis>-sf.<N>`. Naikkan `N` tiap rilis (`sf.3`, `sf.4`, ...). Setelah menarik versi EduBeam baru, mulai lagi dari 1 (mis. `v1.3.0-sf.1`).
+
+**Aturan**
+- **Jangan memindahkan atau menimpa tag yang sudah di-push.** Selalu buat tag baru.
+- **Jangan menghapus tag yang pernah tersaji ke pengguna.** Itu titik rollback dan jejak source untuk kewajiban GPL.
+- **Rollback:** kembalikan `SIPILFRAME_REF` di repo utama ke tag sebelumnya, lalu push.
+- Perubahan yang cuma menyentuh dokumentasi (seperti README ini) tidak perlu tag baru.
+
+**Opsional, belum dicoba di Pages kami:** untuk melihat perubahan di preview sebelum membuat tag, isi env var `SIPILFRAME_REF=main` hanya pada environment **Preview** di Cloudflare Pages. Build preview (push ke branch non-produksi di repo utama) lalu memakai `main` repo ini, sementara produksi tetap terkunci ke tag. Kosongkan lagi setelah selesai, karena selama terisi preview tidak mengunci ke tag.
+
 ## Perubahan dari upstream
 
 Catat setiap perubahan di sini agar mudah ditinjau saat merge.
@@ -127,7 +152,9 @@ Hasil audit awal. Yang sudah dikerjakan ditandai centang.
 
 ## Integrasi dengan SipilStock
 
-Direncanakan: repo utama [`zlabx/zlabx`](https://github.com/zlabx/zlabx) (privat) akan meng-clone repo ini pada **tag tertentu** (mis. `v1.2.0-sf.1`, bukan `main`) saat build Cloudflare Pages, menjalankan `VITE_BASE=/sipilframe/ npm run build`, lalu menyalin `dist/` ke `sipilframe/`, dengan pola yang sama seperti SipilCAD. Karena repo ini publik, tidak diperlukan token untuk clone.
+**Aktif.** Repo utama [`zlabx/zlabx`](https://github.com/zlabx/zlabx) (privat) membangun repo ini saat build Cloudflare Pages: `scripts/build-sipilframe.sh` meng-clone **tag tertentu** (nilai `SIPILFRAME_REF`, bukan `main`), menjalankan `VITE_BASE=/sipilframe/ npm run build`, lalu menyalin `dist/` (ditambah `LICENSE` dan `SOURCE.txt` berisi repo, tag, dan commit) ke folder `sipilframe/`. Folder itu di-gitignore di repo utama dan dibuat ulang tiap deploy. Hasilnya tersaji di <https://sipilstock.com/sipilframe/>. Karena repo ini publik, clone tidak butuh token.
+
+Aplikasi ini disajikan dari subfolder, jadi path berawalan `/` harus lewat `import.meta.env.BASE_URL` (lihat bagian [Aturan](#aturan-supaya-update-tetap-murah)).
 
 ## Lisensi
 
