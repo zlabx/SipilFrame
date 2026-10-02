@@ -65,10 +65,9 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
       },
       manifest: {
-        name: 'edubeam',
-        short_name: 'edubeam',
-        description:
-          'Explore 2D structural analysis directly in your web browser – tailored for students and educators alike. Solve beam and truss structures.',
+        name: 'SipilFrame',
+        short_name: 'SipilFrame',
+        description: 'Analisis struktur 2D online untuk balok, rangka batang, dan portal.',
         theme_color: '#111133',
         background_color: '#111133',
         // Installed, it opens in its own window with no address bar - the drawing needs the height.
