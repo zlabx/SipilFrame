@@ -22,8 +22,8 @@ SipilFrame adalah turunan (derivative work) dari **[EduBeam](https://github.com/
 ## Status
 
 - Basis saat ini: **EduBeam v1.2.0**, upstream commit [`ac56926`](https://github.com/janvorisek/edubeam/commit/ac56926) (27 Sep 2026).
-- Modifikasi kode: **penonaktifan telemetri upstream** (Sentry), **self-host font** (tanpa Google Fonts), satu tautan GitHub, perbaikan path subfolder, dan **rebranding bertahap ke SipilFrame** (tahap 1–2 selesai: judul tab, ikon, manifest PWA, pratinjau tautan, logo app bar, judul dialog selamat datang, dan nama file unduhan; lihat [Rebranding](#rebranding-ke-sipilframe-bertahap)). Solver tidak diubah. Baris footer ("edubeam v…") masih menunggu tahap 3.
-- Rilis: **`v1.2.0-sf.1`** (pertama), **`v1.2.0-sf.2`** (perbaikan dialog "What's New" saat disajikan dari subfolder), **`v1.2.0-sf.3`** (rebranding tahap 1), dan **`v1.2.0-sf.4`** (rebranding tahap 2). Repo utama mengunci versi build ke salah satu tag ini.
+- Modifikasi kode: **penonaktifan telemetri upstream** (Sentry), **self-host font** (tanpa Google Fonts), satu tautan GitHub, perbaikan path subfolder, dan **rebranding bertahap ke SipilFrame** (tahap 1–3 selesai: judul tab, ikon, manifest PWA, pratinjau tautan, logo app bar, judul dialog selamat datang, nama file unduhan, dan footer menu samping; lihat [Rebranding](#rebranding-ke-sipilframe-bertahap)). Solver tidak diubah.
+- Rilis: **`v1.2.0-sf.1`** (pertama), **`v1.2.0-sf.2`** (perbaikan dialog "What's New" saat disajikan dari subfolder), **`v1.2.0-sf.3`** (rebranding tahap 1), **`v1.2.0-sf.4`** (rebranding tahap 2), dan **`v1.2.0-sf.5`** (rebranding tahap 3). Repo utama mengunci versi build ke salah satu tag ini.
 - **Sudah live** di <https://sipilstock.com/sipilframe/>. Versi yang tayang selalu sama dengan `SIPILFRAME_REF` di repo utama dan terlihat di `/sipilframe/SOURCE.txt`; cara menaikkannya ada di [Cara rilis](#cara-rilis-naik-versi-di-produksi).
 - Item [checklist](#checklist-sebelum-deploy) yang tersisa hanya `FUNDING.yml` (sengaja dibiarkan).
 
@@ -138,6 +138,8 @@ Catat setiap perubahan di sini agar mudah ditinjau saat merge.
 | `src/App.vue` (logo) | Teks logo app bar "edubeam" menjadi "SipilFrame" (gaya Lobster tetap lewat kelas `.app-title`) | Identitas di UI |
 | `src/locales/*.json` (11 file) | Judul dialog selamat datang memakai "SipilFrame" (nama kelas `.edubeam` pada `<span>` dipertahankan); di `cs.json` ditambah deskripsi panel ("Ústředí SipilFrame") | Identitas di UI semua bahasa |
 | `src/components/dialogs/ExportImage.vue`, `src/utils/exportResults.ts` | Nama file unduhan: `sipilframe-<lebar>x<tinggi>.png`/`.svg` dan `sipilframe-results.csv` | Berkas yang diunduh pengguna |
+| `vite.config.ts`, `src/vite-env.d.ts` | Nilai build baru `APP_SF_TAG` dari `git describe --tags --exact-match HEAD` (kosong bila build bukan dari tag) | Footer menampilkan tag rilis yang sebenarnya berjalan |
+| `src/App.vue` (footer menu samping) | Footer memuat `SipilFrame <tag>`, `EduBeam v<versi> · Jan Vorisek`, tanggal dan commit build, serta tautan `GPL-3.0` dan `GitHub` yang menunjuk ke tag yang sedang berjalan; tanpa kunci terjemahan baru | Atribusi terlihat di dalam aplikasi dan jejak source persis untuk GPL |
 | `README.md` | Diganti | Atribusi dan panduan SipilFrame |
 
 Hasil build tanpa env apa pun sudah diverifikasi: tidak ada DSN atau host Sentry di `dist/`, tidak ada source map, dan library Sentry ikut ter-tree-shake. Dengan `VITE_SENTRY_DSN` di-set, Sentry aktif kembali dengan DSN tersebut.
@@ -148,14 +150,14 @@ Verifikasi runtime (Chromium headless, build `/sipilframe/`): aplikasi hanya men
 
 - [x] **Tahap 1 (`sf.3`)**: judul tab, ikon (favicon, iOS, PWA, maskable), manifest PWA, deskripsi, `canonical`, dan gambar pratinjau tautan.
 - [x] **Tahap 2 (`sf.4`)**: logo "edubeam" di app bar, judul dialog selamat datang di 11 file bahasa, dan nama file unduhan (`sipilframe-*.png`, `.svg`, `.csv`). Nama kelas CSS `.edubeam` dipertahankan (hanya gaya) agar merge dari upstream ringan.
-- [ ] **Tahap 3**: baris footer menampilkan tag SipilFrame, versi EduBeam dasar, dan atribusi (Jan Vorisek, GPL-3.0, tautan source).
+- [x] **Tahap 3 (`sf.5`)**: footer di menu samping (ikon hamburger) menampilkan `SipilFrame <tag>`, `EduBeam v<versi> · Jan Vorisek`, tanggal dan commit build, serta tautan `GPL-3.0` dan `GitHub` ke tag yang sedang berjalan. Build yang bukan dari tag menampilkan `dev`.
 - [ ] **Tahap 4** (opsional): bahasa Indonesia (`id.json`, 355 kunci terjemahan) dan pendaftarannya di `src/plugins/i18n.ts`.
 
 **Temuan yang belum ditangani:**
 - Toolbar melebar melewati layar pada lebar 600–767 px (terjadi juga di build upstream; logo baru menambah sekitar 12 px). Perbaikan sederhana: sembunyikan label tombol sampai breakpoint `md`.
 - `suggestLanguage()` (`src/utils/index.ts`) mencocokkan `navigator.languages` secara persis dengan kode bahasa, jadi `cs-CZ` atau `id-ID` tidak otomatis memilih `cs` atau `id`. Untuk tahap 4, perlu pencocokan prefiks agar pengguna Indonesia otomatis mendapat `id`. Sementara itu bahasa bisa dipilih lewat `?lang=<kode>` atau pemilih bahasa di Settings.
 
-**Sengaja tidak diubah:** penanda `edubeam: true` di data model (bagian format berkas sesi, demi pertukaran dengan EduBeam asli), tautan dokumentasi ke `edubeam.app` beserta `utm_source`, nama paket di `package.json`, folder `docs/`, dan atribusi di README serta LICENSE.
+**Sengaja tidak diubah:** `APP_VERSION` (tetap versi EduBeam, 1.2.0; dipakai logika changelog dan tersimpan di berkas model), penanda `edubeam: true` di data model (bagian format berkas sesi, demi pertukaran dengan EduBeam asli), tautan dokumentasi ke `edubeam.app` beserta `utm_source`, nama paket di `package.json`, folder `docs/`, dan atribusi di README serta LICENSE.
 
 ## Checklist sebelum deploy
 
@@ -167,7 +169,7 @@ Hasil audit awal. Yang sudah dikerjakan ditandai centang.
 - [x] **Google Analytics** hanya aktif jika `VITE_GANALYTICS_TAG_ID` diisi; biarkan kosong kecuali memang dipakai.
 - [x] **Google Fonts** di-self-host (lihat tabel di atas). Sekarang tidak ada request ke pihak ketiga, sehingga tidak perlu menyebut Google di Kebijakan Privasi.
 - [x] **Atribusi dan source.** Tombol GitHub di aplikasi menunjuk ke repo ini, yang README-nya memuat atribusi EduBeam (Jan Vorisek, GPL-3.0). Tautan "Documentation" tetap ke dokumentasi asli (`edubeam.app`).
-- [x] **Branding tab, ikon, PWA, pratinjau tautan, logo app bar, dan judul selamat datang** sudah SipilFrame (tahap 1–2). Baris footer menyusul di tahap 3.
+- [x] **Branding tab, ikon, PWA, pratinjau tautan, logo app bar, dan judul selamat datang** sudah SipilFrame (tahap 1–3). Footer menu samping memuat tag SipilFrame, atribusi EduBeam, lisensi, dan tautan source.
 - [ ] **`.github/FUNDING.yml`** masih menunjuk ke sponsor upstream. Sengaja dibiarkan agar dukungan mengalir ke penulis asli; ganti bila tidak diinginkan.
 
 ## Integrasi dengan SipilStock

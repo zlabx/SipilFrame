@@ -9,3 +9,4 @@ declare module '*.vue' {
 declare const APP_VERSION: string;
 declare const APP_RELEASED: string;
 declare const APP_COMMIT: string;
+declare const APP_SF_TAG: string;

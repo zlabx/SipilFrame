@@ -16,6 +16,18 @@ import { execSync } from 'child_process';
 const commitDate = execSync('git log -1 --format=%cI').toString().trimEnd();
 const commitHash = execSync('git rev-parse HEAD').toString().trimEnd();
 
+// SipilFrame: tag rilis (mis. v1.2.0-sf.4) untuk footer. Terisi saat build dari tag
+// (scripts/build-sipilframe.sh di repo utama meng-clone tag); kosong bila HEAD bukan tag.
+const sfTag = (() => {
+  try {
+    return execSync('git describe --tags --exact-match HEAD', { stdio: ['ignore', 'pipe', 'ignore'] })
+      .toString()
+      .trim();
+  } catch {
+    return '';
+  }
+})();
+
 // https://vitejs.dev/config/
 /*
  * Where the app is served from.
@@ -97,6 +109,7 @@ export default defineConfig({
     APP_VERSION: JSON.stringify(packageJson.version),
     APP_RELEASED: JSON.stringify(commitDate),
     APP_COMMIT: JSON.stringify(commitHash),
+    APP_SF_TAG: JSON.stringify(sfTag),
   },
 
   resolve: {

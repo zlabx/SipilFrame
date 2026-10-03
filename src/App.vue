@@ -351,6 +351,12 @@ const saveProject = () => {
 const app_version = currentAppVersion;
 const app_released = APP_RELEASED;
 const app_commit = APP_COMMIT;
+
+// SipilFrame: tag rilis diisi saat build dari tag; 'dev' bila bukan dari tag.
+const app_sf_tag = APP_SF_TAG || 'dev';
+const sf_repo = 'https://github.com/zlabx/SipilFrame';
+const source_url = APP_SF_TAG ? `${sf_repo}/tree/${APP_SF_TAG}` : sf_repo;
+const license_url = `${sf_repo}/blob/${APP_SF_TAG || 'main'}/LICENSE`;
 </script>
 
 <template>
@@ -504,9 +510,14 @@ const app_commit = APP_COMMIT;
       </v-list>
       <v-divider />
       <div class="pa-3 text-grey-darken-2" style="font-size: 12px">
-        v{{ app_version }}<br />{{ new Date(app_released).toLocaleDateString(appStore.locale) }}
+        <div class="font-weight-medium">SipilFrame {{ app_sf_tag }}</div>
+        EduBeam v{{ app_version }} · Jan Vorisek<br />
+        {{ new Date(app_released).toLocaleDateString(appStore.locale) }}
         {{ new Date(app_released).toLocaleTimeString(appStore.locale) }}<br />
-        <span style="font-size: 10px">{{ app_commit }}</span>
+        <span style="font-size: 10px">{{ app_commit }}</span
+        ><br />
+        <a class="text-grey-darken-2" :href="license_url" target="_blank" rel="noopener">GPL-3.0</a> ·
+        <a class="text-grey-darken-2" :href="source_url" target="_blank" rel="noopener">GitHub</a>
       </div>
     </v-navigation-drawer>
 
