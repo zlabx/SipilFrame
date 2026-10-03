@@ -147,7 +147,7 @@ export const buildResultsCsv = (solver: LinearStaticSolver, units: ResultUnits) 
 export const downloadResultsCsv = (
   solver: LinearStaticSolver,
   units: ResultUnits,
-  filename = 'edubeam-results.csv'
+  filename = 'sipilframe-results.csv'
 ) => {
   // The BOM makes Excel read the file as UTF-8, which matters for non-Latin node labels.
   const blob = new Blob([`\ufeff${buildResultsCsv(solver, units)}`], { type: 'text/csv;charset=utf-8' });

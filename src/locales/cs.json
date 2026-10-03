@@ -336,14 +336,14 @@
     },
     "bottomBar": {
       "title": "Přidávání, odebírání a úprava entit",
-      "description": " Ústředí edubeamu, kde lze jednodušše měnit každý aspekt vaší konstrukce. Od uzlů po prvky, zatížení, materiály a průřezy - je to místo, kde můžete provádět rychlé a komplexní změny."
+      "description": " Ústředí SipilFrame, kde lze jednodušše měnit každý aspekt vaší konstrukce. Od uzlů po prvky, zatížení, materiály a průřezy - je to místo, kde můžete provádět rychlé a komplexní změny."
     },
     "previousButton": "Předchozí",
     "nextButton": "Další",
     "finishButton": "Dokončit prohlídku"
   },
   "welcome": {
-    "title": "Vítejte v <span class=\"edubeam\">edubeamu</span>! 🚀",
+    "title": "Vítejte v <span class=\"edubeam\">SipilFrame</span>! 🚀",
     "description": "Abychom vám usnadnili začátek, připravili jsme pro vás rychlou úvodní prohlídku, která vás seznámí s vlastnostmi a funkcemi našeho programu."
   },
   "confirmation": {

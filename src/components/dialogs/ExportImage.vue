@@ -1175,13 +1175,13 @@ const enlargeCanvas = () =>
 
 const save = () =>
   run(async () => {
-    downloadBlob(await render(), `edubeam-${fileWidth.value}x${fileHeight.value}.png`);
+    downloadBlob(await render(), `sipilframe-${fileWidth.value}x${fileHeight.value}.png`);
     notify('exportImage.exported');
   });
 
 const saveVector = () =>
   run(async () => {
-    downloadBlob(await renderVector(), `edubeam-${width.value}x${height.value}.svg`);
+    downloadBlob(await renderVector(), `sipilframe-${width.value}x${height.value}.svg`);
     notify('exportImage.exported');
   });
 
