@@ -35,7 +35,7 @@ SipilFrame adalah turunan (derivative work) dari **[EduBeam](https://github.com/
 - Visualisasi bentuk awal dan deformasi, diagram N-V-M, dan reaksi tumpuan.
 - Mode edukasi: tampilan matriks kekakuan, DOF, dan detail solver.
 - Berbagi model lewat tautan atau ekspor JSON.
-- Antarmuka multibahasa upstream: 11 bahasa (`cn`, `cs`, `de`, `en`, `es`, `fr`, `pl`, `pt`, `ru`, `th`, `uk`). Bahasa Indonesia belum ada (direncanakan, lihat [Rebranding](#rebranding-ke-sipilframe-bertahap)).
+- Antarmuka multibahasa upstream: 11 bahasa (`cn`, `cs`, `de`, `en`, `es`, `fr`, `pl`, `pt`, `ru`, `th`, `uk`). Bahasa Indonesia tidak ditambahkan (keputusan: tidak diperlukan; lihat [Rebranding](#rebranding-ke-sipilframe-bertahap)).
 
 Stack: Vue 3, Vite, TypeScript, Pinia, Vuetify. Semua perhitungan berjalan di browser.
 
@@ -89,7 +89,7 @@ Kalau `README.md` konflik saat merge (upstream ikut mengubahnya), pertahankan ve
 - Batasi perubahan di `main`: branding, konfigurasi, dan tautan ke SipilStock. Hindari refactor.
 - Setelah merge dari upstream, cari path absolut baru yang tidak memperhitungkan subfolder: `grep -rnE "fetch\(\s*[`'\"]/" src` dan cek `src="/..."` / `url(/...)`. Aplikasi ini disajikan dari `/sipilframe/`, jadi path berawalan `/` harus lewat `import.meta.env.BASE_URL` (lihat `Changelog.vue`).
 - Jangan menghapus file upstream yang tidak dipakai (mis. `docs/`); menghapusnya memicu konflik merge di kemudian hari. Cukup jangan di-build.
-- Tambahan besar (mis. terjemahan Indonesia) sebaiknya dikirim juga sebagai PR ke upstream agar tidak perlu dirawat sendiri.
+- Tambahan besar (mis. bahasa baru) sebaiknya dikirim juga sebagai PR ke upstream agar tidak perlu dirawat sendiri.
 - Untuk deploy, kunci ke tag atau commit `main` tertentu, jangan ke `HEAD`, supaya merge upstream yang bermasalah tidak langsung naik ke produksi.
 
 ## Cara rilis (naik versi di produksi)
@@ -151,11 +151,11 @@ Verifikasi runtime (Chromium headless, build `/sipilframe/`): aplikasi hanya men
 - [x] **Tahap 1 (`sf.3`)**: judul tab, ikon (favicon, iOS, PWA, maskable), manifest PWA, deskripsi, `canonical`, dan gambar pratinjau tautan.
 - [x] **Tahap 2 (`sf.4`)**: logo "edubeam" di app bar, judul dialog selamat datang di 11 file bahasa, dan nama file unduhan (`sipilframe-*.png`, `.svg`, `.csv`). Nama kelas CSS `.edubeam` dipertahankan (hanya gaya) agar merge dari upstream ringan.
 - [x] **Tahap 3 (`sf.5`)**: footer di menu samping (ikon hamburger) menampilkan `SipilFrame <tag>`, `EduBeam v<versi> · Jan Vorisek`, tanggal dan commit build, serta tautan `GPL-3.0` dan `GitHub` ke tag yang sedang berjalan. Build yang bukan dari tag menampilkan `dev`.
-- [ ] **Tahap 4** (opsional): bahasa Indonesia (`id.json`, 355 kunci terjemahan) dan pendaftarannya di `src/plugins/i18n.ts`.
+- [x] **Tahap 4 (bahasa Indonesia): dibatalkan.** Tidak diperlukan; antarmuka tetap memakai 11 bahasa bawaan upstream. Rebranding dianggap selesai di tahap 3 (`sf.5`).
 
 **Temuan yang belum ditangani:**
 - Toolbar melebar melewati layar pada lebar 600–767 px (terjadi juga di build upstream; logo baru menambah sekitar 12 px). Perbaikan sederhana: sembunyikan label tombol sampai breakpoint `md`.
-- `suggestLanguage()` (`src/utils/index.ts`) mencocokkan `navigator.languages` secara persis dengan kode bahasa, jadi `cs-CZ` atau `id-ID` tidak otomatis memilih `cs` atau `id`. Untuk tahap 4, perlu pencocokan prefiks agar pengguna Indonesia otomatis mendapat `id`. Sementara itu bahasa bisa dipilih lewat `?lang=<kode>` atau pemilih bahasa di Settings.
+- `suggestLanguage()` (`src/utils/index.ts`) mencocokkan `navigator.languages` secara persis dengan kode bahasa, jadi `cs-CZ` tidak otomatis memilih `cs`. Bawaan upstream dan tidak diubah; bahasa bisa dipilih lewat `?lang=<kode>` atau pemilih bahasa di Settings. Perlu diperhatikan bila suatu hari menambah bahasa.
 
 **Sengaja tidak diubah:** `APP_VERSION` (tetap versi EduBeam, 1.2.0; dipakai logika changelog dan tersimpan di berkas model), penanda `edubeam: true` di data model (bagian format berkas sesi, demi pertukaran dengan EduBeam asli), tautan dokumentasi ke `edubeam.app` beserta `utm_source`, nama paket di `package.json`, folder `docs/`, dan atribusi di README serta LICENSE.
 
