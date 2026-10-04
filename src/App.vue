@@ -365,6 +365,9 @@ const showUpstreamLinks = false;
 // SipilFrame: tombol ikon GitHub di app bar disembunyikan. Tautan source tetap ada di footer menu samping
 // (GPL-3.0 dan GitHub ke tag yang berjalan). Ubah ke true untuk menampilkannya lagi.
 const showGithubButton = false;
+// SipilFrame: baris versi EduBeam, tanggal, dan ID commit di footer menu samping disembunyikan. Footer tetap memuat
+// tag SipilFrame serta tautan GPL-3.0 dan GitHub. Ubah ke true untuk menampilkannya lagi.
+const showBuildInfo = false;
 </script>
 
 <template>
@@ -525,11 +528,13 @@ const showGithubButton = false;
       <v-divider />
       <div class="pa-3 text-grey-darken-2" style="font-size: 12px">
         <div class="font-weight-medium">SipilFrame {{ app_sf_tag }}</div>
-        EduBeam v{{ app_version }} · Jan Vorisek<br />
-        {{ new Date(app_released).toLocaleDateString(appStore.locale) }}
-        {{ new Date(app_released).toLocaleTimeString(appStore.locale) }}<br />
-        <span style="font-size: 10px">{{ app_commit }}</span
-        ><br />
+        <template v-if="showBuildInfo">
+          EduBeam v{{ app_version }} · Jan Vorisek<br />
+          {{ new Date(app_released).toLocaleDateString(appStore.locale) }}
+          {{ new Date(app_released).toLocaleTimeString(appStore.locale) }}<br />
+          <span style="font-size: 10px">{{ app_commit }}</span
+          ><br />
+        </template>
         <a class="text-grey-darken-2" :href="license_url" target="_blank" rel="noopener">GPL-3.0</a> ·
         <a class="text-grey-darken-2" :href="source_url" target="_blank" rel="noopener">GitHub</a>
       </div>

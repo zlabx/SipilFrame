@@ -23,7 +23,7 @@ SipilFrame adalah turunan (derivative work) dari **[EduBeam](https://github.com/
 
 - Basis saat ini: **EduBeam v1.2.0**, upstream commit [`ac56926`](https://github.com/janvorisek/edubeam/commit/ac56926) (27 Sep 2026).
 - Modifikasi kode: **penonaktifan telemetri upstream** (Sentry), **self-host font** (tanpa Google Fonts), satu tautan GitHub, perbaikan path subfolder, dan **rebranding bertahap ke SipilFrame** (tahap 1–3 selesai: judul tab, ikon, manifest PWA, pratinjau tautan, logo app bar, judul dialog selamat datang, nama file unduhan, dan footer menu samping; lihat [Rebranding](#rebranding-ke-sipilframe-bertahap)). Solver tidak diubah.
-- Rilis: **`v1.2.0-sf.1`** (pertama), **`v1.2.0-sf.2`** (perbaikan dialog "What's New" saat disajikan dari subfolder), **`v1.2.0-sf.3`** (rebranding tahap 1), **`v1.2.0-sf.4`** (rebranding tahap 2), **`v1.2.0-sf.5`** (rebranding tahap 3), **`v1.2.0-sf.6`** (tombol "What's New?" dan "Documentation" disembunyikan), dan **`v1.2.0-sf.7`** (tombol GitHub di app bar disembunyikan). Repo utama mengunci versi build ke salah satu tag ini.
+- Rilis: **`v1.2.0-sf.1`** (pertama), **`v1.2.0-sf.2`** (perbaikan dialog "What's New" saat disajikan dari subfolder), **`v1.2.0-sf.3`** (rebranding tahap 1), **`v1.2.0-sf.4`** (rebranding tahap 2), **`v1.2.0-sf.5`** (rebranding tahap 3), **`v1.2.0-sf.6`** (tombol "What's New?" dan "Documentation" disembunyikan), **`v1.2.0-sf.7`** (tombol GitHub di app bar disembunyikan), **`v1.2.0-sf.8`** (tombol Clear mesh dan Share model menjadi ikon saja; **dibatalkan**, kodenya di-revert di `main` dan produksi dikembalikan ke `sf.7`), dan **`v1.2.0-sf.9`** (baris versi EduBeam, tanggal, dan ID commit di footer disembunyikan). Repo utama mengunci versi build ke salah satu tag ini.
 - **Sudah live** di <https://sipilstock.com/sipilframe/>. Versi yang tayang selalu sama dengan `SIPILFRAME_REF` di repo utama dan terlihat di `/sipilframe/SOURCE.txt`; cara menaikkannya ada di [Cara rilis](#cara-rilis-naik-versi-di-produksi).
 - Item [checklist](#checklist-sebelum-deploy) yang tersisa hanya `FUNDING.yml` (sengaja dibiarkan).
 
@@ -142,6 +142,7 @@ Catat setiap perubahan di sini agar mudah ditinjau saat merge.
 | `src/App.vue` (footer menu samping) | Footer memuat `SipilFrame <tag>`, `EduBeam v<versi> · Jan Vorisek`, tanggal dan commit build, serta tautan `GPL-3.0` dan `GitHub` yang menunjuk ke tag yang sedang berjalan; tanpa kunci terjemahan baru | Atribusi terlihat di dalam aplikasi dan jejak source persis untuk GPL |
 | `src/App.vue` (flag `showUpstreamLinks`) | Flag `showUpstreamLinks = false` menyembunyikan tombol "What's New?" dan "Documentation" di app bar (`v-if`) dan mematikan popup changelog otomatis (`maybeShowChangelog`). Kode dialog dan tautan tetap ada; ubah flag ke `true` untuk menampilkannya lagi | Changelog dan situs docs milik EduBeam; popup otomatis menampilkan catatan rilis EduBeam kepada pengguna SipilFrame |
 | `src/App.vue` (flag `showGithubButton`) | Flag `showGithubButton = false` menyembunyikan tombol ikon GitHub di app bar (`v-if`). Tautan source tetap ada di footer menu samping (`GPL-3.0` dan `GitHub` ke tag yang berjalan), sehingga kewajiban menyediakan source tetap terpenuhi | App bar lebih bersih; flag terpisah dari `showUpstreamLinks` karena tautannya ke repo ini, bukan ke upstream |
+| `src/App.vue` (flag `showBuildInfo`) | Flag `showBuildInfo = false` menyembunyikan tiga baris di footer menu samping: `EduBeam v<versi> · Jan Vorisek`, tanggal build, dan ID commit (`v-if`, hilang dari DOM). Footer tinggal `SipilFrame <tag>` serta tautan `GPL-3.0` dan `GitHub`. Atribusi EduBeam kini hanya ada di README, `LICENSE`, dan `SOURCE.txt` (bukan di dalam aplikasi) | Tampilan footer lebih ringkas sesuai keputusan pemilik |
 | `README.md` | Diganti | Atribusi dan panduan SipilFrame |
 
 Hasil build tanpa env apa pun sudah diverifikasi: tidak ada DSN atau host Sentry di `dist/`, tidak ada source map, dan library Sentry ikut ter-tree-shake. Dengan `VITE_SENTRY_DSN` di-set, Sentry aktif kembali dengan DSN tersebut.
@@ -152,14 +153,14 @@ Verifikasi runtime (Chromium headless, build `/sipilframe/`): aplikasi hanya men
 
 - [x] **Tahap 1 (`sf.3`)**: judul tab, ikon (favicon, iOS, PWA, maskable), manifest PWA, deskripsi, `canonical`, dan gambar pratinjau tautan.
 - [x] **Tahap 2 (`sf.4`)**: logo "edubeam" di app bar, judul dialog selamat datang di 11 file bahasa, dan nama file unduhan (`sipilframe-*.png`, `.svg`, `.csv`). Nama kelas CSS `.edubeam` dipertahankan (hanya gaya) agar merge dari upstream ringan.
-- [x] **Tahap 3 (`sf.5`)**: footer di menu samping (ikon hamburger) menampilkan `SipilFrame <tag>`, `EduBeam v<versi> · Jan Vorisek`, tanggal dan commit build, serta tautan `GPL-3.0` dan `GitHub` ke tag yang sedang berjalan. Build yang bukan dari tag menampilkan `dev`.
+- [x] **Tahap 3 (`sf.5`)**: footer di menu samping (ikon hamburger) menampilkan `SipilFrame <tag>`, `EduBeam v<versi> · Jan Vorisek`, tanggal dan commit build, serta tautan `GPL-3.0` dan `GitHub` ke tag yang sedang berjalan. Build yang bukan dari tag menampilkan `dev`. Sejak `sf.9`, baris versi EduBeam, tanggal, dan commit disembunyikan (flag `showBuildInfo`); footer tinggal tag SipilFrame serta tautan `GPL-3.0` dan `GitHub`.
 - [x] **Tahap 4 (bahasa Indonesia): dibatalkan.** Tidak diperlukan; antarmuka tetap memakai 11 bahasa bawaan upstream. Rebranding dianggap selesai di tahap 3 (`sf.5`).
 
 **Temuan yang belum ditangani:**
 - Toolbar melebar melewati layar pada lebar 600–767 px adalah masalah bawaan upstream. Sejak `sf.6` tidak lagi terjadi karena tombol "What's New?" dan "Documentation" disembunyikan; bila `showUpstreamLinks` diaktifkan kembali, masalahnya muncul lagi (perbaikan sederhana: sembunyikan label tombol sampai breakpoint `md`).
 - `suggestLanguage()` (`src/utils/index.ts`) mencocokkan `navigator.languages` secara persis dengan kode bahasa, jadi `cs-CZ` tidak otomatis memilih `cs`. Bawaan upstream dan tidak diubah; bahasa bisa dipilih lewat `?lang=<kode>` atau pemilih bahasa di Settings. Perlu diperhatikan bila suatu hari menambah bahasa.
 
-**Catatan:** ikon bantuan "?" di dalam aplikasi tetap menautkan ke dokumentasi di `edubeam.app` (lewat `src/utils/docs.ts`), dan footer tetap memuat atribusi EduBeam, lisensi, dan source.
+**Catatan:** ikon bantuan "?" di dalam aplikasi tetap menautkan ke dokumentasi di `edubeam.app` (lewat `src/utils/docs.ts`), dan footer tetap memuat tag SipilFrame, lisensi, dan source (atribusi EduBeam di dalam aplikasi disembunyikan sejak `sf.9`).
 
 **Sengaja tidak diubah:** `APP_VERSION` (tetap versi EduBeam, 1.2.0; dipakai logika changelog dan tersimpan di berkas model), penanda `edubeam: true` di data model (bagian format berkas sesi, demi pertukaran dengan EduBeam asli), tautan dokumentasi ke `edubeam.app` beserta `utm_source`, nama paket di `package.json`, folder `docs/`, dan atribusi di README serta LICENSE.
 
@@ -173,7 +174,7 @@ Hasil audit awal. Yang sudah dikerjakan ditandai centang.
 - [x] **Google Analytics** hanya aktif jika `VITE_GANALYTICS_TAG_ID` diisi; biarkan kosong kecuali memang dipakai.
 - [x] **Google Fonts** di-self-host (lihat tabel di atas). Sekarang tidak ada request ke pihak ketiga, sehingga tidak perlu menyebut Google di Kebijakan Privasi.
 - [x] **Atribusi dan source.** Tombol GitHub di aplikasi menunjuk ke repo ini, yang README-nya memuat atribusi EduBeam (Jan Vorisek, GPL-3.0). Tautan "Documentation" tetap ke dokumentasi asli (`edubeam.app`).
-- [x] **Branding tab, ikon, PWA, pratinjau tautan, logo app bar, dan judul selamat datang** sudah SipilFrame (tahap 1–3). Footer menu samping memuat tag SipilFrame, atribusi EduBeam, lisensi, dan tautan source.
+- [x] **Branding tab, ikon, PWA, pratinjau tautan, logo app bar, dan judul selamat datang** sudah SipilFrame (tahap 1–3). Footer menu samping memuat tag SipilFrame, lisensi, dan tautan source; atribusi EduBeam ada di README, `LICENSE`, dan `SOURCE.txt` (di dalam aplikasi disembunyikan sejak `sf.9`).
 - [ ] **`.github/FUNDING.yml`** masih menunjuk ke sponsor upstream. Sengaja dibiarkan agar dukungan mengalir ke penulis asli; ganti bila tidak diinginkan.
 
 ## Integrasi dengan SipilStock
