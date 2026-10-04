@@ -362,6 +362,9 @@ const license_url = `${sf_repo}/blob/${APP_SF_TAG || 'main'}/LICENSE`;
 // SipilFrame: tombol "What's New?" dan "Documentation" (milik EduBeam: changelog rilis EduBeam dan situs docs-nya)
 // disembunyikan. Ubah ke true untuk menampilkannya lagi (juga mengaktifkan kembali popup changelog otomatis).
 const showUpstreamLinks = false;
+// SipilFrame: tombol ikon GitHub di app bar disembunyikan. Tautan source tetap ada di footer menu samping
+// (GPL-3.0 dan GitHub ke tag yang berjalan). Ubah ke true untuk menampilkannya lagi.
+const showGithubButton = false;
 </script>
 
 <template>
@@ -454,7 +457,13 @@ const showUpstreamLinks = false;
         <v-icon class="ml-1">mdi-open-in-new</v-icon>
       </v-btn>
 
-      <v-btn class="d-none d-sm-inline-flex" icon href="https://github.com/zlabx/SipilFrame" target="_blank">
+      <v-btn
+        v-if="showGithubButton"
+        class="d-none d-sm-inline-flex"
+        icon
+        href="https://github.com/zlabx/SipilFrame"
+        target="_blank"
+      >
         <v-icon>mdi-github</v-icon>
       </v-btn>
     </v-app-bar>
