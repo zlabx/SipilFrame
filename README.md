@@ -23,7 +23,7 @@ SipilFrame adalah turunan (derivative work) dari **[EduBeam](https://github.com/
 
 - Basis saat ini: **EduBeam v1.2.0**, upstream commit [`ac56926`](https://github.com/janvorisek/edubeam/commit/ac56926) (27 Sep 2026).
 - Modifikasi kode: **penonaktifan telemetri upstream** (Sentry), **self-host font** (tanpa Google Fonts), satu tautan GitHub, perbaikan path subfolder, dan **rebranding bertahap ke SipilFrame** (tahap 1–3 selesai: judul tab, ikon, manifest PWA, pratinjau tautan, logo app bar, judul dialog selamat datang, nama file unduhan, dan footer menu samping; lihat [Rebranding](#rebranding-ke-sipilframe-bertahap)). Solver tidak diubah.
-- Rilis: **`v1.2.0-sf.1`** (pertama), **`v1.2.0-sf.2`** (perbaikan dialog "What's New" saat disajikan dari subfolder), **`v1.2.0-sf.3`** (rebranding tahap 1), **`v1.2.0-sf.4`** (rebranding tahap 2), dan **`v1.2.0-sf.5`** (rebranding tahap 3). Repo utama mengunci versi build ke salah satu tag ini.
+- Rilis: **`v1.2.0-sf.1`** (pertama), **`v1.2.0-sf.2`** (perbaikan dialog "What's New" saat disajikan dari subfolder), **`v1.2.0-sf.3`** (rebranding tahap 1), **`v1.2.0-sf.4`** (rebranding tahap 2), **`v1.2.0-sf.5`** (rebranding tahap 3), dan **`v1.2.0-sf.6`** (tombol "What's New?" dan "Documentation" disembunyikan). Repo utama mengunci versi build ke salah satu tag ini.
 - **Sudah live** di <https://sipilstock.com/sipilframe/>. Versi yang tayang selalu sama dengan `SIPILFRAME_REF` di repo utama dan terlihat di `/sipilframe/SOURCE.txt`; cara menaikkannya ada di [Cara rilis](#cara-rilis-naik-versi-di-produksi).
 - Item [checklist](#checklist-sebelum-deploy) yang tersisa hanya `FUNDING.yml` (sengaja dibiarkan).
 
@@ -140,6 +140,7 @@ Catat setiap perubahan di sini agar mudah ditinjau saat merge.
 | `src/components/dialogs/ExportImage.vue`, `src/utils/exportResults.ts` | Nama file unduhan: `sipilframe-<lebar>x<tinggi>.png`/`.svg` dan `sipilframe-results.csv` | Berkas yang diunduh pengguna |
 | `vite.config.ts`, `src/vite-env.d.ts` | Nilai build baru `APP_SF_TAG` dari `git describe --tags --exact-match HEAD` (kosong bila build bukan dari tag) | Footer menampilkan tag rilis yang sebenarnya berjalan |
 | `src/App.vue` (footer menu samping) | Footer memuat `SipilFrame <tag>`, `EduBeam v<versi> · Jan Vorisek`, tanggal dan commit build, serta tautan `GPL-3.0` dan `GitHub` yang menunjuk ke tag yang sedang berjalan; tanpa kunci terjemahan baru | Atribusi terlihat di dalam aplikasi dan jejak source persis untuk GPL |
+| `src/App.vue` (flag `showUpstreamLinks`) | Flag `showUpstreamLinks = false` menyembunyikan tombol "What's New?" dan "Documentation" di app bar (`v-if`) dan mematikan popup changelog otomatis (`maybeShowChangelog`). Kode dialog dan tautan tetap ada; ubah flag ke `true` untuk menampilkannya lagi | Changelog dan situs docs milik EduBeam; popup otomatis menampilkan catatan rilis EduBeam kepada pengguna SipilFrame |
 | `README.md` | Diganti | Atribusi dan panduan SipilFrame |
 
 Hasil build tanpa env apa pun sudah diverifikasi: tidak ada DSN atau host Sentry di `dist/`, tidak ada source map, dan library Sentry ikut ter-tree-shake. Dengan `VITE_SENTRY_DSN` di-set, Sentry aktif kembali dengan DSN tersebut.
@@ -154,8 +155,10 @@ Verifikasi runtime (Chromium headless, build `/sipilframe/`): aplikasi hanya men
 - [x] **Tahap 4 (bahasa Indonesia): dibatalkan.** Tidak diperlukan; antarmuka tetap memakai 11 bahasa bawaan upstream. Rebranding dianggap selesai di tahap 3 (`sf.5`).
 
 **Temuan yang belum ditangani:**
-- Toolbar melebar melewati layar pada lebar 600–767 px (terjadi juga di build upstream; logo baru menambah sekitar 12 px). Perbaikan sederhana: sembunyikan label tombol sampai breakpoint `md`.
+- Toolbar melebar melewati layar pada lebar 600–767 px adalah masalah bawaan upstream. Sejak `sf.6` tidak lagi terjadi karena tombol "What's New?" dan "Documentation" disembunyikan; bila `showUpstreamLinks` diaktifkan kembali, masalahnya muncul lagi (perbaikan sederhana: sembunyikan label tombol sampai breakpoint `md`).
 - `suggestLanguage()` (`src/utils/index.ts`) mencocokkan `navigator.languages` secara persis dengan kode bahasa, jadi `cs-CZ` tidak otomatis memilih `cs`. Bawaan upstream dan tidak diubah; bahasa bisa dipilih lewat `?lang=<kode>` atau pemilih bahasa di Settings. Perlu diperhatikan bila suatu hari menambah bahasa.
+
+**Catatan:** ikon bantuan "?" di dalam aplikasi tetap menautkan ke dokumentasi di `edubeam.app` (lewat `src/utils/docs.ts`), dan footer tetap memuat atribusi EduBeam, lisensi, dan source.
 
 **Sengaja tidak diubah:** `APP_VERSION` (tetap versi EduBeam, 1.2.0; dipakai logika changelog dan tersimpan di berkas model), penanda `edubeam: true` di data model (bagian format berkas sesi, demi pertukaran dengan EduBeam asli), tautan dokumentasi ke `edubeam.app` beserta `utm_source`, nama paket di `package.json`, folder `docs/`, dan atribusi di README serta LICENSE.
 

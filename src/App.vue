@@ -275,6 +275,7 @@ const openChangelog = () => {
 const currentAppVersion = APP_VERSION;
 
 const maybeShowChangelog = () => {
+  if (!showUpstreamLinks) return;
   if (appStore.inViewerMode) return;
   if (!currentAppVersion) return;
   if (appStore.lastSeenChangelogVersion === currentAppVersion) return;
@@ -357,6 +358,10 @@ const app_sf_tag = APP_SF_TAG || 'dev';
 const sf_repo = 'https://github.com/zlabx/SipilFrame';
 const source_url = APP_SF_TAG ? `${sf_repo}/tree/${APP_SF_TAG}` : sf_repo;
 const license_url = `${sf_repo}/blob/${APP_SF_TAG || 'main'}/LICENSE`;
+
+// SipilFrame: tombol "What's New?" dan "Documentation" (milik EduBeam: changelog rilis EduBeam dan situs docs-nya)
+// disembunyikan. Ubah ke true untuk menampilkannya lagi (juga mengaktifkan kembali popup changelog otomatis).
+const showUpstreamLinks = false;
 </script>
 
 <template>
@@ -439,12 +444,12 @@ const license_url = `${sf_repo}/blob/${APP_SF_TAG || 'main'}/LICENSE`;
 
       <v-spacer></v-spacer>
 
-      <v-btn class="d-none d-sm-inline-flex" @click="openChangelog">
+      <v-btn v-if="showUpstreamLinks" class="d-none d-sm-inline-flex" @click="openChangelog">
         <v-icon class="mr-1">mdi-history</v-icon>
         <span>{{ $t('common.whatisnew') }}</span>
       </v-btn>
 
-      <v-btn class="d-inline-flex" href="https://edubeam.app" target="_blank">
+      <v-btn v-if="showUpstreamLinks" class="d-inline-flex" href="https://edubeam.app" target="_blank">
         {{ $t('common.documentation') }}
         <v-icon class="ml-1">mdi-open-in-new</v-icon>
       </v-btn>
