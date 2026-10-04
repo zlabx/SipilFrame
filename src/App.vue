@@ -424,10 +424,7 @@ const showGithubButton = false;
       <div class="app-title ml-3 d-flex align-center" style="user-select: none">SipilFrame</div>
 
       <v-btn
-        v-tooltip="{ text: $t('common.clearMesh'), location: 'bottom' }"
         class="d-none d-sm-inline-flex ml-3"
-        icon
-        :aria-label="$t('common.clearMesh')"
         @click="
           openModal(Confirmation, {
             title: t('confirmation.clearMesh.title'),
@@ -441,16 +438,11 @@ const showGithubButton = false;
         "
       >
         <v-icon>mdi-delete-empty</v-icon>
+        <span>{{ $t('common.clearMesh') }}</span>
       </v-btn>
 
-      <v-btn
-        v-tooltip="{ text: $t('common.shareModel'), location: 'bottom' }"
-        class="d-none d-sm-inline-flex"
-        icon
-        :aria-label="$t('common.shareModel')"
-        @click="shareMesh"
-      >
-        <v-icon>mdi-share</v-icon>
+      <v-btn class="d-none d-sm-inline-flex" @click="shareMesh">
+        <v-icon>mdi-share</v-icon> {{ $t('common.shareModel') }}
       </v-btn>
 
       <v-spacer></v-spacer>
