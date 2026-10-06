@@ -298,10 +298,21 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* Scroll arrows of the strip point up / down instead of left / right. */
-.dock-right #bottomBar .v-slide-group__prev .v-icon,
-.dock-right #bottomBar .v-slide-group__next .v-icon {
-  transform: rotate(90deg);
+/*
+ * No scroll arrows: Vuetify shows them on desktop whenever the tabs overflow, whatever show-arrows
+ * says. A strip taller than the panel scrolls with the wheel instead, scrollbar hidden.
+ */
+.dock-right #bottomBar .v-slide-group__prev,
+.dock-right #bottomBar .v-slide-group__next {
+  display: none !important;
+}
+
+.dock-right #bottomBar .v-slide-group__container {
+  scrollbar-width: none;
+}
+
+.dock-right #bottomBar .v-slide-group__container::-webkit-scrollbar {
+  display: none;
 }
 
 /* Tab text runs top to bottom; the icon is turned back upright. */
