@@ -353,8 +353,7 @@ const app_version = currentAppVersion;
 const app_released = APP_RELEASED;
 const app_commit = APP_COMMIT;
 
-// SipilFrame: tag rilis diisi saat build dari tag; 'dev' bila bukan dari tag.
-const app_sf_tag = APP_SF_TAG || 'dev';
+// SipilFrame: tautan License dan Source di footer menunjuk ke tag yang sedang berjalan (APP_SF_TAG; kosong bila build bukan dari tag).
 const sf_repo = 'https://github.com/zlabx/SipilFrame';
 const source_url = APP_SF_TAG ? `${sf_repo}/tree/${APP_SF_TAG}` : sf_repo;
 const license_url = `${sf_repo}/blob/${APP_SF_TAG || 'main'}/LICENSE`;
@@ -527,7 +526,7 @@ const showBuildInfo = false;
       </v-list>
       <v-divider />
       <div class="pa-3 text-grey-darken-2" style="font-size: 12px">
-        <div class="font-weight-medium">SipilFrame {{ app_sf_tag }}</div>
+        <div class="font-weight-medium">SipilFrame 2027</div>
         <template v-if="showBuildInfo">
           EduBeam v{{ app_version }} · Jan Vorisek<br />
           {{ new Date(app_released).toLocaleDateString(appStore.locale) }}
@@ -535,8 +534,8 @@ const showBuildInfo = false;
           <span style="font-size: 10px">{{ app_commit }}</span
           ><br />
         </template>
-        <a class="text-grey-darken-2" :href="license_url" target="_blank" rel="noopener">GPL-3.0</a> ·
-        <a class="text-grey-darken-2" :href="source_url" target="_blank" rel="noopener">GitHub</a>
+        <a class="text-grey-darken-2" :href="license_url" target="_blank" rel="noopener">License</a> ·
+        <a class="text-grey-darken-2" :href="source_url" target="_blank" rel="noopener">Source</a>
       </div>
     </v-navigation-drawer>
 
