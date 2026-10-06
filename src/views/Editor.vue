@@ -258,9 +258,64 @@ onUnmounted(() => {
   border-top: 0 !important;
 }
 
-/* Narrower panel: tighter tabs so more of them fit before the scroll arrows are needed. */
+/*
+ * Docked right, the tab strip becomes a vertical strip on the panel's right edge (like AutoCAD
+ * palettes): #bottomBar turns into a grid and the header wrapper dissolves (display: contents) so
+ * its two children - the tabs and the button group - can be placed independently.
+ */
+.dock-right #bottomBar {
+  display: grid !important;
+  /* A definite height, so the 1fr row (and the vertical tab strip) cannot grow with its content. */
+  height: 100%;
+  grid-template-columns: minmax(0, 1fr) 36px;
+  grid-template-rows: 36px minmax(0, 1fr);
+}
+
+.dock-right #bottomBar > [data-resize-handle] {
+  display: contents !important;
+}
+
+/* Help, dock and minimize buttons: top row, left of the vertical strip. */
+.dock-right #bottomBar > [data-resize-handle] > div:not(.v-tabs) {
+  grid-column: 1;
+  grid-row: 1;
+  justify-content: flex-end;
+}
+
+.dock-right #bottomBar > .v-window {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.dock-right #bottomBar .v-tabs {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  width: 36px;
+  /* Stretch to the grid area instead of growing with the tabs, so overflow scrolls (arrows). */
+  height: auto;
+  align-self: stretch;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Scroll arrows of the strip point up / down instead of left / right. */
+.dock-right #bottomBar .v-slide-group__prev .v-icon,
+.dock-right #bottomBar .v-slide-group__next .v-icon {
+  transform: rotate(90deg);
+}
+
+/* Tab text runs top to bottom; the icon is turned back upright. */
 .dock-right #bottomBar .v-tab.v-btn {
+  writing-mode: vertical-rl;
+  width: 36px;
   min-width: 0;
-  padding-inline: 12px;
+  height: auto;
+  padding: 10px 0;
+}
+
+.dock-right #bottomBar .v-tab .v-icon {
+  transform: rotate(-90deg);
+  margin-right: 0 !important;
+  margin-bottom: 6px;
 }
 </style>

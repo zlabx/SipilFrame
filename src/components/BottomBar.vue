@@ -5,6 +5,7 @@
       <v-tabs
         v-model="appStore.bottomBarTab"
         bg-color="primary"
+        :direction="dock.isRight ? 'vertical' : 'horizontal'"
         :show-arrows="dock.isRight"
         height="36"
         :hide-slider="props.height === 36"
