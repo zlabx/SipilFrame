@@ -5,7 +5,7 @@
       <v-tabs
         v-model="appStore.bottomBarTab"
         bg-color="primary"
-        :show-arrows="false"
+        :show-arrows="dock.isRight"
         height="36"
         :hide-slider="props.height === 36"
       >
@@ -23,6 +23,7 @@
       </v-tabs>
       <div class="bg-primary d-flex align-center">
         <HelpTip :topic="activeHelpTopic" location="top left" size="small" density="comfortable" align="center" />
+        <DockToggle />
         <v-btn
           color="primary"
           density="compact"
@@ -1540,6 +1541,8 @@ import { formatMeasureAsHTML } from '../SVGUtils';
 import { buildResultsTsv, downloadResultsCsv, resultUnitsFromStore } from '../utils/exportResults';
 
 import HelpTip from './HelpTip.vue';
+import DockToggle from './DockToggle.vue';
+import { useDockStore } from '@/store/dock';
 import type { HelpTopicKey } from '../utils/helpTopics';
 
 import { openModal } from 'jenesius-vue-modal';
@@ -1568,6 +1571,7 @@ import { useI18n } from 'vue-i18n';
 const { t } = useI18n();
 
 const appStore = useAppStore();
+const dock = useDockStore();
 const projStore = useProjectStore();
 const layoutStore = useLayoutStore();
 
