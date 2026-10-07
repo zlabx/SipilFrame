@@ -1,6 +1,6 @@
 <template>
   <div class="d-flex flex-column">
-    <div v-if="!appStore.inViewerMode">
+    <div v-if="!appStore.inViewerMode && showTabBar">
       <div class="" style="border-bottom: 1px solid rgba(0, 0, 0, 0.12)">
         <v-tabs v-model="appStore.tab" height="36" bg-color="secondary">
           <v-tab v-for="(item, index) in appStore.tabs" :key="item.title" :class="{ 'pr-0': item.closable }">
@@ -48,4 +48,8 @@ import { useProjectStore } from '../store/project';
 
 const appStore = useAppStore();
 const projStore = useProjectStore();
+
+// Fork: the Viewer / Settings tab bar is hidden. Settings opens as a modal (appStore.openSettings),
+// so the legacy Settings tab is not needed and Viewer is the only page. Set true to bring it back.
+const showTabBar = false;
 </script>
