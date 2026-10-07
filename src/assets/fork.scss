@@ -1,12 +1,12 @@
 /*
- * SipilFrame (fork) light chrome: the main header and the right-hand panel's tab strip are white,
+ * SipilFrame (fork) light chrome: the main header and the panel's tab strip are white,
  * flat (no shadow), separated from the canvas by a hairline, with black text and icons.
  *
  * Kept as plain CSS overrides in this fork-owned file, so App.vue and BottomBar.vue keep their
  * upstream markup (colors there are still "primary") and merging upstream stays cheap.
  */
 
-$divider: #e0e0e0;
+$divider: #cdd0d4;
 
 /* ---- Main header ---- */
 .v-app-bar.v-toolbar.bg-primary {
@@ -36,4 +36,44 @@ $divider: #e0e0e0;
 
 .dock-right #bottomBar .v-tab.v-tab--selected {
   background-color: #f0f0f0;
+}
+
+/* ---- Bottom panel (mobile / narrow screens): same light header as the right-hand strip ---- */
+#bottomBar {
+  /* Overrides the inline #ddd; the right dock drops this border altogether (see Editor.vue). */
+  border-top-color: $divider !important;
+}
+
+#bottomBar > [data-resize-handle],
+#bottomBar > [data-resize-handle] .bg-primary {
+  background-color: #fff !important;
+  color: #000 !important;
+}
+
+#bottomBar > [data-resize-handle] .v-btn,
+#bottomBar > [data-resize-handle] .v-icon,
+#bottomBar > [data-resize-handle] .v-tab.v-btn {
+  color: #000 !important;
+}
+
+/* The minimize button is an "elevated" primary button; flatten it into the white header. */
+#bottomBar > [data-resize-handle] .v-btn {
+  box-shadow: none !important;
+}
+
+#bottomBar > [data-resize-handle] .v-tab.v-btn {
+  opacity: 1;
+}
+
+#bottomBar > [data-resize-handle] .v-tab.v-tab--selected {
+  background-color: #f0f0f0;
+}
+
+/* Hairline under the header, drawn as the window's top border so no height is added. */
+#bottomBar > .v-window {
+  border-top: 1px solid $divider;
+}
+
+.dock-right #bottomBar > .v-window {
+  border-top: 0;
 }
