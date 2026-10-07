@@ -35,6 +35,7 @@ import { useAppStore } from '@/store/app';
 import { useProjectStore } from '@/store/project';
 import { useLayoutStore } from '@/store/layout';
 import { useDockStore } from '@/store/dock';
+import '@/assets/fork.scss';
 import { useDockResize } from '@/utils/dockResize';
 
 const appStore = useAppStore();
