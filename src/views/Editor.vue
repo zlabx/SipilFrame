@@ -29,7 +29,7 @@ import HelloWorld from '@/components/HelloWorld.vue';
 import BottomBar from '@/components/BottomBar.vue';
 import Widget from '@/components/Widget.vue';
 
-import { onMounted, onUnmounted, ref, computed } from 'vue';
+import { getCurrentInstance, onMounted, onUnmounted, ref, computed } from 'vue';
 import { useElementSize } from '@vueuse/core';
 import { useAppStore } from '@/store/app';
 import { useProjectStore } from '@/store/project';
@@ -41,6 +41,10 @@ const appStore = useAppStore();
 const projectStore = useProjectStore();
 const layoutStore = useLayoutStore();
 const dock = useDockStore();
+
+// Expose the dock store to templates as `$dock` (read by BottomBar.vue; see store/dock.ts).
+const instance = getCurrentInstance();
+if (instance) instance.appContext.config.globalProperties.$dock = dock;
 const dockResize = useDockResize();
 
 const rootRef = ref<HTMLElement | null>(null);

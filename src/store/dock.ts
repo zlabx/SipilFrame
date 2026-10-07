@@ -47,3 +47,13 @@ export const useDockStore = defineStore(
     },
   }
 );
+
+declare module 'vue' {
+  interface ComponentCustomProperties {
+    /**
+     * Set by Editor.vue. Lets BottomBar.vue read the dock side from its template alone, so that
+     * file needs no import or setup code of ours (fewer merge conflicts with upstream).
+     */
+    $dock?: ReturnType<typeof useDockStore>;
+  }
+}

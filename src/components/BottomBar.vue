@@ -5,7 +5,7 @@
       <v-tabs
         v-model="appStore.bottomBarTab"
         bg-color="primary"
-        :direction="dock.isRight ? 'vertical' : 'horizontal'"
+        :direction="$dock?.isRight ? 'vertical' : 'horizontal'"
         :show-arrows="false"
         height="36"
         :hide-slider="props.height === 36"
@@ -1541,7 +1541,6 @@ import { formatMeasureAsHTML } from '../SVGUtils';
 import { buildResultsTsv, downloadResultsCsv, resultUnitsFromStore } from '../utils/exportResults';
 
 import HelpTip from './HelpTip.vue';
-import { useDockStore } from '@/store/dock';
 import type { HelpTopicKey } from '../utils/helpTopics';
 
 import { openModal } from 'jenesius-vue-modal';
@@ -1570,7 +1569,6 @@ import { useI18n } from 'vue-i18n';
 const { t } = useI18n();
 
 const appStore = useAppStore();
-const dock = useDockStore();
 const projStore = useProjectStore();
 const layoutStore = useLayoutStore();
 
