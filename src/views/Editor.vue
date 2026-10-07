@@ -7,7 +7,6 @@
     </div>
     <HelloWorld class="fill-height dock-main" style="min-height: 0" />
     <div
-      v-show="!dockCollapsed"
       class="resizer"
       :data-direction="dock.isRight ? 'horizontal' : 'vertical'"
       @pointerdown="dockResize.onPointerDown"
@@ -15,23 +14,12 @@
       @pointerup="dockResize.onPointerUp"
       @pointercancel="dockResize.onPointerUp"
     ></div>
-    <!-- Stays mounted when collapsed on the right: BottomBar also reacts to events while closed. -->
     <div
       v-if="!appStore.inViewerMode"
-      v-show="!dockCollapsed"
       class="dock-panel"
       :style="dock.isRight ? { width: `${dockWidth}px` } : undefined"
     >
       <BottomBar :height="computedBottomBarHeight" class="d-block" />
-    </div>
-    <div v-if="dockCollapsed" class="dock-rail">
-      <v-btn
-        color="primary"
-        density="compact"
-        icon="mdi-window-restore"
-        variant="text"
-        @click="appStore.bottomBarOpen = true"
-      ></v-btn>
     </div>
   </div>
 </template>
@@ -65,14 +53,12 @@ const drag = ref(false);
 const computedBottomBarHeight = computed(() => {
   if (appStore.inViewerMode) return 0;
 
-  // Docked right, the panel fills the full height of the editor; BottomBar sizes its tables from it.
-  if (dock.isRight) return Math.max(rootHeight.value, MIN_BOTTOM_BAR_HEIGHT);
+  // Docked right, the panel fills the full height of the editor. The tab/button header row is
+  // hidden there (see CSS), but BottomBar still subtracts its 36px from every table, so add it back.
+  if (dock.isRight) return Math.max(rootHeight.value, MIN_BOTTOM_BAR_HEIGHT) + 36;
 
   return appStore.bottomBarOpen ? appStore.bottomBarHeight : 36;
 });
-
-/** Docked right and minimized: the panel is hidden and a slim rail with a restore button remains. */
-const dockCollapsed = computed(() => dock.isRight && !appStore.bottomBarOpen && !appStore.inViewerMode);
 
 const dockWidth = computed(() => Math.min(dock.width, dock.maxWidth));
 
@@ -214,15 +200,6 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-.dock-rail {
-  flex: none;
-  width: 36px;
-  display: flex;
-  justify-content: center;
-  padding-top: 4px;
-  background-color: rgb(var(--v-theme-primary));
-}
-
 .dock-right > .dock-main {
   flex: 1 1 0;
   min-width: 0;
@@ -259,39 +236,39 @@ onUnmounted(() => {
 }
 
 /*
- * Docked right, the tab strip becomes a vertical strip on the panel's right edge (like AutoCAD
- * palettes): #bottomBar turns into a grid and the header wrapper dissolves (display: contents) so
- * its two children - the tabs and the button group - can be placed independently.
+ * Docked right, the sidebar has no header row: the tab strip becomes a vertical strip on the right
+ * edge (like AutoCAD palettes) and the help / minimize buttons are hidden. #bottomBar turns into a
+ * one-row grid and the header wrapper dissolves (display: contents), so the tabs and the window
+ * become its two cells.
  */
 .dock-right #bottomBar {
   display: grid !important;
-  /* A definite height, so the 1fr row (and the vertical tab strip) cannot grow with its content. */
+  /* A definite height, so the row (and the vertical tab strip) cannot grow with its content. */
   height: 100%;
+  /* The inline min-height includes the hidden header row (see computedBottomBarHeight). */
+  min-height: 0 !important;
   grid-template-columns: minmax(0, 1fr) 36px;
-  grid-template-rows: 36px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .dock-right #bottomBar > [data-resize-handle] {
   display: contents !important;
 }
 
-/* Help, dock and minimize buttons: top row, left of the vertical strip. */
 .dock-right #bottomBar > [data-resize-handle] > div:not(.v-tabs) {
-  grid-column: 1;
-  grid-row: 1;
-  justify-content: flex-end;
+  display: none !important;
 }
 
 .dock-right #bottomBar > .v-window {
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 1;
 }
 
 .dock-right #bottomBar .v-tabs {
   grid-column: 2;
-  grid-row: 1 / span 2;
+  grid-row: 1;
   width: 36px;
-  /* Stretch to the grid area instead of growing with the tabs, so overflow scrolls (arrows). */
+  /* Stretch to the grid area instead of growing with the tabs, so overflow scrolls. */
   height: auto;
   align-self: stretch;
   min-height: 0;
