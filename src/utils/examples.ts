@@ -18,9 +18,8 @@ export interface ExampleViewerFlags {
 }
 
 export interface ExampleDefinition {
+  /** Also names its title and blurb, under `examples.items.<id>` in the locales. */
   id: string;
-  title: string;
-  blurb: string;
   viewer: ExampleViewerFlags;
   /** Populates an empty solver that already carries the shared material and section. */
   build: (solver: LinearStaticSolver) => void;
@@ -59,8 +58,6 @@ const DEFAULT_OVERLAYS: ExampleViewerFlags = {
 export const examples: ExampleDefinition[] = [
   {
     id: 'welcome',
-    title: 'Indeterminate beam',
-    blurb: 'Statically indeterminate 3 m fixed–roller beam under 10 kN/m UDL.',
     viewer: { ...DEFAULT_OVERLAYS, showShearForce: true },
     build: (solver) => {
       const domain = solver.domain;
@@ -72,21 +69,18 @@ export const examples: ExampleDefinition[] = [
   },
   {
     id: 'cantilever',
-    title: 'Cantilever',
-    blurb: '4 m cantilever resisting an 18 kN downward nodal load, highlighting curvature and tip deflection.',
     viewer: { ...DEFAULT_OVERLAYS },
     build: (solver) => {
       const domain = solver.domain;
       domain.createNode('A', [0, 0, 0], [DofID.Dx, DofID.Dz, DofID.Ry]);
       domain.createNode('B', [4, 0, 0], []);
       domain.createBeam2D('E1', ['A', 'B'], EXAMPLE_MATERIAL_LABEL, EXAMPLE_CROSS_SECTION_LABEL);
-      solver.loadCases[0].createNodalLoad('B', { [DofID.Dx]: 0, [DofID.Dz]: -18000, [DofID.Ry]: 0 });
+      // Positive z points down: the 18 kN acts downward, as the blurb says.
+      solver.loadCases[0].createNodalLoad('B', { [DofID.Dx]: 0, [DofID.Dz]: 18000, [DofID.Ry]: 0 });
     },
   },
   {
     id: 'pratt',
-    title: 'Pratt truss',
-    blurb: 'Simple Pratt truss with 8 kN joint loads showing axial force distribution and displacements.',
     // Axial force labels crowd the small preview cards, so the truss leads with its deflected shape.
     viewer: { ...DEFAULT_OVERLAYS, showMoments: false },
     build: (solver) => {
@@ -128,8 +122,6 @@ export const examples: ExampleDefinition[] = [
   },
   {
     id: 'continuous',
-    title: 'Three-span continuous beam',
-    blurb: '5+6+5 m spans with UDL + point + UDL to compare curvature and support rotations.',
     viewer: { ...DEFAULT_OVERLAYS, showShearForce: true },
     build: (solver) => {
       const domain = solver.domain;
@@ -143,14 +135,12 @@ export const examples: ExampleDefinition[] = [
       domain.createBeam2D('E3', ['C', 'D'], EXAMPLE_MATERIAL_LABEL, EXAMPLE_CROSS_SECTION_LABEL);
 
       solver.loadCases[0].createBeamElementUniformEdgeLoad('E1', [0, 8000], true);
-      solver.loadCases[0].createNodalLoad('C', { [DofID.Dx]: 0, [DofID.Dz]: -20000, [DofID.Ry]: 0 });
+      solver.loadCases[0].createNodalLoad('C', { [DofID.Dx]: 0, [DofID.Dz]: 20000, [DofID.Ry]: 0 });
       solver.loadCases[0].createBeamElementUniformEdgeLoad('E3', [0, 6000], true);
     },
   },
   {
     id: 'portal',
-    title: 'Portal frame load case',
-    blurb: '8 m beam on 6 m columns under roof UDL and lateral + vertical knee loads for sway and bending checks.',
     viewer: { ...DEFAULT_OVERLAYS },
     build: (solver) => {
       const domain = solver.domain;
@@ -169,8 +159,6 @@ export const examples: ExampleDefinition[] = [
   },
   {
     id: 'temperature',
-    title: 'Temperature load',
-    blurb: 'Simply supported 8 m beam with uniform and non-uniform temperature load.',
     viewer: { ...DEFAULT_OVERLAYS },
     build: (solver) => {
       const domain = solver.domain;

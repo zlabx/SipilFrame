@@ -59,7 +59,7 @@
                   <v-col cols="12">
                     <v-text-field
                       v-model="loadNodeValueFz"
-                      :label="`${mainLabel}z`"
+                      :label="`${mainLabel}${appStore.axes.v}`"
                       hide-details="auto"
                       :rules="numberRules"
                       :suffix="mainUnits"
@@ -71,7 +71,7 @@
                   <v-col cols="12">
                     <v-text-field
                       v-model="loadNodeValueMy"
-                      :label="`${momentLabel}y`"
+                      :label="`${momentLabel}${appStore.axes.r}`"
                       hide-details="auto"
                       :rules="numberRules"
                       :suffix="`${momentUnits}`"
@@ -108,6 +108,7 @@ import { DofID } from 'ts-fem';
 import { closeModal } from 'jenesius-vue-modal';
 import { useAppStore } from '@/store/app';
 import { checkNumber, executeModelMutationWithUndo, parseFloat2, numberRules } from '@/utils';
+import { i18n } from '@/plugins/i18n';
 import Vector2DHelper from '../Vector2DHelper.vue';
 
 const projectStore = useProjectStore();
@@ -147,15 +148,17 @@ watch(loadNodeId, () => {
 const mainLabel = computed(() => (loadType.value === 'force' ? 'F' : 'D'));
 const momentLabel = computed(() => (loadType.value === 'force' ? 'M' : 'R'));
 
-const mainUnits = computed(() => (loadType.value === 'force' ? appStore.units.Force : appStore.units.Length));
+const mainUnits = computed(() => (loadType.value === 'force' ? appStore.units.Force : appStore.units.Displacement));
 const momentUnits = computed(() => (loadType.value === 'force' ? appStore.units.Moment : 'rad'));
 
 const realFx = computed(() => appStore.convertInverseForce(parseFloat2(loadNodeValueFx.value)));
-const realFz = computed(() => appStore.convertInverseForce(parseFloat2(loadNodeValueFz.value)));
+const realFz = computed(() => appStore.vertical(appStore.convertInverseForce(parseFloat2(loadNodeValueFz.value))));
 const realMy = computed(() => appStore.convertInverseMoment(parseFloat2(loadNodeValueMy.value)));
 
-const realDx = computed(() => appStore.convertInverseLength(parseFloat2(loadNodeValueFx.value)));
-const realDz = computed(() => appStore.convertInverseLength(parseFloat2(loadNodeValueFz.value)));
+const realDx = computed(() => appStore.convertInverseDisplacement(parseFloat2(loadNodeValueFx.value)));
+const realDz = computed(() =>
+  appStore.vertical(appStore.convertInverseDisplacement(parseFloat2(loadNodeValueFz.value)))
+);
 const realRy = computed(() => parseFloat2(loadNodeValueMy.value));
 
 onMounted(() => {
@@ -171,7 +174,7 @@ const addNodalLoad = () => {
     // check if the node already has a prescribed displacement
     for (const load of projectStore.solver.loadCases[0].prescribedBC) {
       if (load.target === loadNodeId.value) {
-        alert('Prescribed displacement already exists for this node. Please remove it first.');
+        alert(i18n.global.t('warnings.prescribedDisplacementExists'));
         closeModal();
         return;
       }

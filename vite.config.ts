@@ -3,6 +3,7 @@ import { sentryVitePlugin } from '@sentry/vite-plugin';
 import vue from '@vitejs/plugin-vue';
 import vuetify, { transformAssetUrls } from 'vite-plugin-vuetify';
 import VueI18nPlugin from '@intlify/unplugin-vue-i18n/vite';
+import brandLocales from './scripts/viteBrandLocales';
 import { VitePWA } from 'vite-plugin-pwa';
 
 import { resolve, dirname } from 'node:path';
@@ -54,6 +55,7 @@ export default defineConfig({
     vuetify({
       autoImport: true,
     }),
+    brandLocales(), // SipilFrame: brand the welcome/tour texts at build time (see scripts/viteBrandLocales.ts)
     VueI18nPlugin({
       include: resolve(dirname(fileURLToPath(import.meta.url)), './src/locales/**'),
       runtimeOnly: false,

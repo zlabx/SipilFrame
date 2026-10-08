@@ -1,51 +1,79 @@
 # Jednotky a nastavení
 
-Nastavení otevřete tlačítkem **⚙ v zobrazení → Všechna nastavení**, kliknutím na **štítek jednotek** v pravém dolním rohu zobrazení nebo záložkou **Nastavení** nad zobrazením. Nastavení se ukládá v prohlížeči a přežije obnovení stránky; **Obnovit výchozí nastavení** vrátí výchozí hodnoty zobrazení (jazyk a jednotky zůstanou).
+Nastavení otevřete třemi způsoby:
 
-## Jazyk a prostředí
+- záložkou **Nastavení** nad zobrazením – nastavení pak zabere celou plochu;
+- **štítkem jednotek** vpravo dole v zobrazení – otevře se na stránce *Jazyk a prostředí*;
+- tlačítkem **Všechna nastavení** pod možnostmi zobrazení – otevře se na stránce *Nastavení zobrazení*.
 
-**Jazyk** – 11 jazyků rozhraní. Aplikaci lze otevřít i s parametrem `?lang=<kód>` (`en`, `cs`, `de`, `fr`, `es`, `pt`, `pl`, `cn`, `th`, `uk`, `ru`).
+Nastavení se ukládá v prohlížeči, takže vydrží i obnovení stránky. Tlačítko **Obnovit výchozí nastavení** vrátí výchozí hodnoty zobrazení, formát čísel, osy, tlačítko pro posun a jednotky vašeho regionu; jazyk ponechá.
 
-**Jednotky** – každá veličina má vlastní jednotku. Vstupy, tabulky, popisky i hodnoty v průbězích používají zvolenou jednotku a změna jednotky přepočítá, co je zobrazeno (model se interně ukládá v SI, takže přepínáním nic neztratíte).
+## Jazyk a prostředí {#language-locale}
 
-| Veličina | Možnosti | Výchozí |
-| --- | --- | --- |
-| Délka | m, cm, mm, in, ft | m |
-| Plocha | m², cm², mm², in², ft² | m² |
-| Moment setrvačnosti | m⁴, cm⁴, mm⁴, in⁴, ft⁴ | m⁴ |
-| Hmotnost | kg, lb | kg |
-| Síla | N, kN, MN, lbf, tonf, kgf | kN |
-| Ohybový moment | Nmm, Nm, kNm, MNm, tonf·m, lbf·in, lbf·ft | kNm |
-| Napětí (E, G) | Pa, kPa, MPa, GPa, psi, ksc | MPa |
+![Nastavení → Jazyk a prostředí](/screenshots/cs/settings-language.webp)
 
-Spojitá zatížení používají *sílu / délku* ve zvolených jednotkách (výchozí kN/m). Úhly jsou vždy v radiánech, teploty vždy ve °C/K.
+**Jazyk.** Rozhraní je k dispozici ve 12 jazycích. Aplikaci můžete otevřít také s parametrem `?lang=<kód>`: `en`, `cs`, `de`, `fr`, `es`, `pt`, `pl`, `cn`, `th`, `uk`, `ru`, `tr`.
 
-::: tip Imperiální jednotky
-Zvolte ft (nebo in), in², in⁴, lbf a psi podle potřeby – jediný „imperiální“ přepínač neexistuje, každá veličina se nastavuje zvlášť.
-:::
+**Formát čísel.** Určuje, jak se zapisují výsledky: *Automatický*, *Vědecký* (výchozí) nebo *Inženýrský*. Viz [Formát čísel](/cs/essentials/results#number-format).
 
-## Nastavení zobrazení
+**Souřadnicový systém.** *x doprava, z dolů* (výchozí) nebo *x doprava, y nahoru*. Při volbě y nahoru se obrátí znaménko svislých hodnot a úhlů podpor a osy se přejmenují ve všech vstupech, tabulkách, popiscích i exportech. Model ani uložené soubory se nezmění. Viz [Osy s y nahoru](/cs/elements/conventions#y-up-axes).
 
-**Náhled zobrazení** nahoře ukazuje malý model, který reaguje na každou změnu níže.
+![Trojkloubový rám s osou y nahoru: ukazatel os v rohu míří y nahoru](/screenshots/cs/settings-y-up.webp){.shot-lg}
+
+**Soustava jednotek.** Volba *SI (metrická)* nebo *Americká (imperiální)* nastaví naráz všechny jednotky níže. Jakmile pak kteroukoli z nich změníte, soustava se zobrazí jako *Vlastní*. Při první návštěvě soustavu vybíráte v uvítacím dialogu; do té doby EduBeam zvolí americké jednotky jen tehdy, když má prohlížeč nastavené americké národní prostředí *a* počítač je v americkém časovém pásmu.
+
+**Jednotky.** Každá veličina má vlastní jednotku. Vstupy, tabulky, popisky i hodnoty v průbězích používají zvolenou jednotku a po její změně se zobrazené hodnoty přepočítají. Model samotný se ukládá v SI, takže přepínáním tam a zpět nic neztratíte a sdílený odkaz otevře stejný model v jakýchkoli jednotkách.
+
+| Veličina | Možnosti | SI | Americké |
+| --- | --- | --- | --- |
+| Délka (geometrie) | m, cm, mm, ft, in | m | ft |
+| Rozměry průřezu | m, cm, mm, ft, in | m | in |
+| Posun | m, cm, mm, ft, in | m | in |
+| Plocha | m², cm², mm², ft², in² | m² | in² |
+| Moment setrvačnosti | m⁴, cm⁴, mm⁴, ft⁴, in⁴ | m⁴ | in⁴ |
+| Hmotnost | kg, lb | kg | lb |
+| Síla | N, kN, MN, kgf, Tonf, lbf, kip | kN | kip |
+| Ohybový moment | Nmm, Nm, kNm, MNm, Tonf·m, lbf·in, lbf·ft, kip·in, kip·ft | kNm | kip·ft |
+| Napětí (E, G) | Pa, kPa, MPa, GPa, ksc, psi, ksi, psf, ksf | MPa | ksi |
+| Teplota | °C, °F | °C | °F |
+
+Spojitá zatížení se zadávají v jednotkách *síla / délka* (kN/m v SI, kip/ft v amerických jednotkách), hustota v jednotkách *hmotnost / délka³*. Součinitel teplotní roztažnosti se řídí jednotkou teploty (1/K nebo 1/°F). Teplotní zatížení jsou *změny* teploty, takže 10 °C odpovídá 18 °F. Pootočení jsou vždy v radiánech.
+
+Tonf je metrická tuna-síla (1000 kgf), nikoli americká krátká tuna (short ton). Americké jednotky se převádějí podle přesných definic (1 ft = 0,3048 m, 1 kip = 4448,2216 N). Stopy zadávejte jako desetinné číslo, například `5,5`; pravítka a zaměřovací kříž ukazují stopy a palce (5′-6″).
+
+## Nastavení zobrazení {#viewer-settings}
+
+![Nastavení → Nastavení zobrazení, vpravo živý náhled](/screenshots/cs/settings-viewer.webp)
+
+**Náhled zobrazení** vedle nastavení ukazuje malý model, který okamžitě reaguje na každou změnu. Štítky pod ním určují, který výsledek se zobrazí; když kliknete na barvu, náhled se přepne na příslušný výsledek.
 
 **Mřížka**
-- **Zobrazit mřížku** (<kbd>G</kbd>) – vykreslí mřížku a pravítka.
-- **Přichytávat k mřížce** (<kbd>S</kbd>) – uzly umístěné či přetažené myší se přichytí ke kroku mřížky.
-- **Krok příchytu k mřížce** – rozteč v metrech (výchozí 0,1).
-
-**Popisky výsledků**
-- **Orientace popisků výsledků** – *Kolmo k vykreslení grafu* (popisky sledují průběh) nebo *Vždy vodorovně*.
+- **Zobrazit mřížku** (<kbd>G</kbd>) vykreslí mřížku a pravítka.
+- **Přichytávat k mřížce** (<kbd>S</kbd>) přichytí uzly, které umisťujete nebo přetahujete, ke kroku mřížky.
+- **Zobrazit zaměřovací kříž** vyznačí polohu ukazatele na pravítkách, takže odečtete jeho souřadnice (jen při ovládání myší).
+- **Krok příchytu k mřížce** je rozteč v jednotce délky: výchozí hodnota je 0,1 m, v amerických jednotkách 0,5 ft. Když přepnete mezi metrickými a americkými jednotkami, výchozí krok se změní na výchozí krok druhé soustavy; krok, který jste nastavili sami, zůstane.
 
 **Velikost**
-- **Měřítko výsledků** (0–120 px) – výška největší pořadnice průběhu / největšího průhybu na obrazovce. Průběhy se normují vlastním maximem, jde tedy o čistě vizuální volbu; upravte ji, když jsou průběhy vůči modelu příliš velké nebo malé.
-- **Velikost podpor** (0,5–1,5) a **Velikost písma** (10–20 px).
+- **Měřítko výsledků** (8–120 px, výchozí 48) je výška největší pořadnice průběhu nebo největšího průhybu na obrazovce. Každý průběh se škáluje podle svého maxima, jde tedy čistě o vzhled; upravte ho, když jsou průběhy příliš velké nebo malé.
+- **Velikost podpor** (50–150 %) a **Velikost písma** (10–20 px). Na projektoru se hodí větší písmo.
 
-**Barvy** – samostatné barvy pro uzly, prvky, zatížení, deformovaný tvar, normálovou sílu, posouvající sílu, ohybový moment a reakce. Výchozí: N modrá, V zelená, M červená, reakce fialová, zatížení oranžová.
+**Orientace popisků výsledků**: *Kolmo k vykreslení grafu* (popisky sledují průběh) nebo *Vždy vodorovně*.
 
-## Ovládání & zkratky
+**Kontrola modelu**
+- **Zobrazit, jak se nestabilní konstrukce může pohybovat** vykreslí čárkovaný obrys mechanismu.
+- **Animovat pohyb** tento obrys rozhýbe tam a zpět.
 
-**Posun zobrazení pomocí** – kterým tlačítkem myši se posouvá plátno: *prostřední nebo pravé* (výchozí), *Kolečko myši* (jen prostřední tlačítko) nebo jen *Pravé tlačítko*. Úplný seznam zkratek je na stránce [Klávesnice a myš](/cs/reference/shortcuts).
+**Barvy**: vlastní barva pro uzly, prvky, zatížení, deformovaný tvar, normálovou sílu, posouvající sílu, ohybový moment a reakce. Výchozí barvy: N modrá, V zelená, M červená, reakce fialová, zatížení oranžová.
 
-## Co se ukládá automaticky
+## Ovládání & zkratky {#controls-shortcuts}
 
-Kromě nastavení si EduBeam po každé změně ukládá **aktuální model** do místního úložiště prohlížeče. Obnovení záložky nebo opětovné otevření aplikace ho obnoví. Platí to pro daný prohlížeč a zařízení – k přenosu jinam použijte [Uložit projekt nebo Sdílet konstrukci](/cs/essentials/import-export).
+**Posun zobrazení pomocí** určuje, kterým tlačítkem myši posouváte plátno: *Kolečko nebo pravé tlačítko* (výchozí), *Kolečko myši* nebo *Pravé tlačítko*. Úplný seznam zkratek najdete na stránce [Klávesnice, myš a dotyk](/cs/reference/shortcuts).
+
+## Co se ukládá v prohlížeči {#what-is-stored-in-your-browser}
+
+Kromě nastavení si EduBeam v místním úložišti prohlížeče uchovává:
+
+- **aktuální model** – ukládá se po každé změně, takže se po obnovení záložky nebo opětovném otevření aplikace vrátí;
+- **Nedávné konstrukce** – posledních 10 modelů, které jste smazali nebo nahradili.
+
+Obojí patří jen k danému prohlížeči a zařízení a smazáním dat webu zmizí. Pokud chcete model uchovat nebo přenést jinam, použijte [Uložit projekt nebo Sdílet konstrukci](/cs/essentials/import-export).

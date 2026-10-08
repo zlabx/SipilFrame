@@ -32,14 +32,12 @@ import Widget from '@/components/Widget.vue';
 import { getCurrentInstance, onMounted, onUnmounted, ref, computed } from 'vue';
 import { useElementSize } from '@vueuse/core';
 import { useAppStore } from '@/store/app';
-import { useProjectStore } from '@/store/project';
 import { useLayoutStore } from '@/store/layout';
 import { useDockStore } from '@/store/dock';
 import '@/assets/fork.scss';
 import { useDockResize } from '@/utils/dockResize';
 
 const appStore = useAppStore();
-const projectStore = useProjectStore();
 const layoutStore = useLayoutStore();
 const dock = useDockStore();
 

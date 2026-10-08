@@ -12,13 +12,17 @@ import {
   throttle,
 } from '@/utils';
 import { ensureDimensionId } from '@/utils/id';
+import { inPlaneValues } from '@/utils/dofValues';
 import type { DimensionLine } from '@/types/dimension';
 import {
+  emptyDiagnostics,
   findMechanismIssues,
+  solveIssue,
   validateSolverModel,
   type SolveDiagnostics,
   type SolveIssue,
 } from '@/utils/validateSolverModel';
+import { i18n } from '@/plugins/i18n';
 
 export const useProjectStore = defineStore(
   'project',
@@ -113,10 +117,25 @@ export const useProjectStore = defineStore(
       return [...solver.value.domain.crossSections.values()];
     });
 
-    const solveDiagnostics = ref<SolveDiagnostics>({
-      errors: [],
-      warnings: [],
-    });
+    const solveDiagnostics = ref<SolveDiagnostics>(emptyDiagnostics());
+
+    /**
+     * Kinds of warning the user closed, for this session. Closing says "I know about unconnected
+     * nodes", not "about node 5": adding nodes one at a time would otherwise bring the same
+     * warning straight back. A different kind still shows, and errors cannot be dismissed at all,
+     * they are why there are no results.
+     */
+    const dismissedWarnings = ref<string[]>([]);
+
+    const visibleWarnings = computed(() =>
+      solveDiagnostics.value.warnings.filter((issue) => !dismissedWarnings.value.includes(issue.code))
+    );
+
+    const dismissWarnings = () => {
+      dismissedWarnings.value = [
+        ...new Set([...dismissedWarnings.value, ...solveDiagnostics.value.warnings.map((issue) => issue.code)]),
+      ];
+    };
 
     const beams = computed(() => {
       const vals = solver.value.domain.elements.values();
@@ -131,7 +150,7 @@ export const useProjectStore = defineStore(
       const diagnostics = validateSolverModel(solver.value);
       solveDiagnostics.value = diagnostics;
 
-      if (diagnostics.errors.length > 0) {
+      if (diagnostics.errors.length > 0 || diagnostics.incomplete.length > 0) {
         solver.value.loadCases[0].solved = false;
         return;
       }
@@ -139,10 +158,7 @@ export const useProjectStore = defineStore(
       if (solver.value.domain.elements.size === 0 || solver.value.domain.nodes.size === 0) return;
 
       const failWith = (...issues: SolveIssue[]) => {
-        solveDiagnostics.value = {
-          errors: [...diagnostics.errors, ...issues],
-          warnings: diagnostics.warnings,
-        };
+        solveDiagnostics.value = { ...diagnostics, errors: [...diagnostics.errors, ...issues] };
         solver.value.loadCases[0].solved = false;
       };
 
@@ -152,13 +168,18 @@ export const useProjectStore = defineStore(
         // mathjs reports an exactly singular system, which for a structure means a mechanism.
         const isSingular = /singular/i.test(e instanceof Error ? e.message : String(e));
 
-        failWith({
-          level: 'error',
-          code: isSingular ? 'SINGULAR_STIFFNESS_MATRIX' : 'SOLVER_RUNTIME_EXCEPTION',
-          message: isSingular
-            ? 'Structure is a mechanism: the stiffness matrix is singular. Check that every part is held by at least 3 restraints and that end hinges do not leave a member free to rotate.'
-            : 'Solver failed due to an internal model inconsistency. Please review model references and loads.',
-        });
+        failWith(
+          isSingular
+            ? solveIssue(
+                'error',
+                'SINGULAR_STIFFNESS_MATRIX',
+                () => i18n.global.t('solveDiagnostics.issues.singularMatrix'),
+                { summary: () => i18n.global.t('solveDiagnostics.issues.singularMatrixShort') }
+              )
+            : solveIssue('error', 'SOLVER_RUNTIME_EXCEPTION', () =>
+                i18n.global.t('solveDiagnostics.issues.solverFailed')
+              )
+        );
         return;
       }
 
@@ -217,9 +238,8 @@ export const useProjectStore = defineStore(
 
       if (maxDefo === 1e-32 && solver.value.loadCases[0].prescribedBC.length > 0) {
         for (const bc of solver.value.loadCases[0].prescribedBC) {
-          const ux = Math.abs(bc.prescribedValues[0]);
-          const uz = Math.abs(bc.prescribedValues[2]);
-          maxDefo = Math.max(maxDefo, ux, uz);
+          const { 0: ux, 2: uz } = inPlaneValues(bc.prescribedValues);
+          maxDefo = Math.max(maxDefo, Math.abs(ux), Math.abs(uz));
         }
       }
 
@@ -346,6 +366,8 @@ export const useProjectStore = defineStore(
       crossSections,
       dimensions,
       solveDiagnostics,
+      visibleWarnings,
+      dismissWarnings,
     };
   },
   {
@@ -356,7 +378,6 @@ export const useProjectStore = defineStore(
           return serializeModel(value.solver, value.dimensions);
         },
         deserialize: (value) => {
-          console.log(value);
           if (value === undefined) return { _solver: '' };
           return { _solver: value };
         },

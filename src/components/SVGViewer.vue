@@ -2,6 +2,7 @@
 import { closeModal, openModal } from 'jenesius-vue-modal';
 import SvgPanZoom from './SVGPanZoom.vue';
 import SvgGrid from './SVGGrid.vue';
+import Crosshair from './Crosshair.vue';
 import SvgViewerDefs from './SVGViewerDefs.vue';
 import { useProjectStore } from '../store/project';
 import { ref, onMounted, computed, nextTick, watch, reactive, onUnmounted, provide } from 'vue';
@@ -24,6 +25,7 @@ import SVGElementConcentratedLoad from './svg/ElementConcentratedLoad.vue';
 import SVGNodalLoad from './svg/NodalLoad.vue';
 import SVGPrescribedDisplacement from './svg/PrescribedDisplacement.vue';
 import SVGNode from './svg/Node.vue';
+import SVGSolveIssues from './svg/SolveIssues.vue';
 import SVGElement from './svg/Element.vue';
 import SVGElementTemperatureLoad from './svg/ElementTemperatureLoad.vue';
 import SVGDimensioning from './svg/Dimensioning.vue';
@@ -33,6 +35,7 @@ import { windowDragKey, windowPickBox, type WindowDrag } from '@/types/windowPic
 import HoveredElement from './HoveredElement.vue';
 import { intersectedKey } from '@/types/hover';
 import PlacingPreview from './PlacingPreview.vue';
+import FirstBeamTask from './FirstBeamTask.vue';
 import { placingKey } from '@/types/placing';
 
 import {
@@ -50,6 +53,7 @@ import { selectionSubtitle } from '@/utils/selectionDetails';
 import { boundsFromPoints } from '@/utils/fitBounds';
 import { placePopupNearAnchor, type AnchorRect } from '@/utils/popupPlacement';
 import { deviceCanTouch, deviceHasHover } from '@/utils/pointer';
+import { hasShortcutModifier } from '@/utils/keyboard';
 import {
   Node,
   DofID,
@@ -74,6 +78,7 @@ import ContextMenuDimension from './ContextMenuDimension.vue';
 
 import { MouseMode } from '@/mouse';
 import { formatMeasureAsHTML } from '../SVGUtils';
+import { snapToGrid, type LengthDisplay } from '@/utils/grid';
 
 import Selection from './Selection.vue';
 
@@ -122,6 +127,7 @@ const resolvedResultLabelMode = computed(() => props.resultLabelMode ?? viewerSt
 
 const panZoom = ref<InstanceType<typeof SvgPanZoom> | null>(null);
 const grid = ref<InstanceType<typeof SvgGrid> | null>(null);
+const crosshair = ref<InstanceType<typeof Crosshair> | null>(null);
 
 const svg = ref<SVGSVGElement>();
 const viewport = ref<SVGGElement>();
@@ -269,12 +275,12 @@ const hideTooltip = (clearHoverState = true) => {
 };
 
 const zoom = (e: KeyboardEvent) => {
-  if (e.ctrlKey && e.code === 'Equal') {
+  if (hasShortcutModifier(e) && e.code === 'Equal') {
     panZoom.value?.zoom(svg.value.clientWidth / 2, svg.value.clientHeight / 2, -0.1);
     e.preventDefault();
   }
 
-  if (e.ctrlKey && e.code === 'Minus') {
+  if (hasShortcutModifier(e) && e.code === 'Minus') {
     panZoom.value?.zoom(svg.value.clientWidth / 2, svg.value.clientHeight / 2, 0.1);
     e.preventDefault();
   }
@@ -317,34 +323,89 @@ const solve = () => {
   });
 };
 
-const hasSolveDiagnosticsIssues = computed(
-  () => projectStore.solveDiagnostics.errors.length > 0 || projectStore.solveDiagnostics.warnings.length > 0
+/**
+ * Why there are no results, if anything. A model still being drawn gets the next step in
+ * neutral colours, not an error: a beam without supports is unfinished, not wrong. The first
+ * beam task asks for the supports itself, so there the chip stays out of its way.
+ */
+const solveBanner = computed(() => {
+  const { errors, incomplete } = projectStore.solveDiagnostics;
+
+  if (errors.length > 0) {
+    // A single error says what it is; a count only helps once there are several.
+    const text =
+      errors.length === 1
+        ? (errors[0].summary ?? errors[0].message)
+        : t('solveDiagnostics.summaryErrors', { errors: errors.length });
+
+    // The exclamation mark the other viewer alerts use; `$error` is a cross that reads as "close".
+    return { type: 'error' as const, icon: '$warning', text };
+  }
+
+  if (incomplete.length > 0 && !appStore.firstBeamActive) {
+    // Only a chip: this is where every model passes through, so it should not shout.
+    const text =
+      incomplete.length === 1
+        ? (incomplete[0].summary ?? incomplete[0].message)
+        : t('solveDiagnostics.summaryIncomplete', { count: incomplete.length });
+
+    return { type: 'incomplete' as const, icon: 'mdi-information-outline', text };
+  }
+
+  return null;
+});
+
+/** The errors on screen, by what they are and where, so a re-solve of the same model matches. */
+const errorsKey = computed(() =>
+  projectStore.solveDiagnostics.errors
+    .map((issue) => `${issue.code}|${[...(issue.nodes ?? [])].sort().join(',')}`)
+    .join(';')
 );
 
-const hasBlockingSolveIssues = computed(() => projectStore.solveDiagnostics.errors.length > 0);
+/**
+ * The errors whose banner was closed. Closing only folds it into a chip: an error is why there
+ * are no results, so it never goes away entirely, but on a small screen the banner has to make
+ * room. A different error unfolds it again; any other edit leaves it folded.
+ */
+const collapsedErrorsKey = ref<string | null>(null);
+const errorsCollapsed = computed(() => collapsedErrorsKey.value === errorsKey.value);
 
-const solveDiagnosticsSummary = computed(() => {
-  const errors = projectStore.solveDiagnostics.errors.length;
-  const warnings = projectStore.solveDiagnostics.warnings.length;
+/**
+ * Warnings get a banner of their own. They do not stop the solve, and some are on purpose - a
+ * spare node kept for later - so they can be closed, also while an error is shown.
+ */
+const warningBanner = computed(() => {
+  const warnings = projectStore.visibleWarnings;
+  if (warnings.length === 0) return null;
 
-  if (errors > 0 && warnings > 0) {
-    return `Model has ${errors} error(s) and ${warnings} warning(s).`;
-  }
+  return warnings.length === 1
+    ? warnings[0].message
+    : t('solveDiagnostics.summaryWarnings', { warnings: warnings.length });
+});
 
-  if (errors > 0) {
-    return `Model has ${errors} error(s).`;
-  }
+/** Whether the canvas has a motion to show, and so the banner an outline to hide. */
+const hasFreeMotion = computed(() => projectStore.solveDiagnostics.errors.some((issue) => issue.motion));
 
-  return `Model has ${warnings} warning(s).`;
+const motionToggleLabel = computed(() =>
+  t(viewerStore.showMechanisms ? 'solveDiagnostics.hideMotion' : 'solveDiagnostics.showMotion')
+);
+
+/** While the pointer is on the message, the canvas keeps showing the motion it describes. */
+const holdFreeMotion = ref(false);
+
+/**
+ * An unfinished model shows how it can move only once it is loaded. Loads usually come after
+ * the supports, so loading a structure that is still not held means results are expected, and
+ * the motion explains why there are none. Before that the student is simply still drawing.
+ */
+const modelHasLoads = computed(() => {
+  const loadCase = projectStore.solver.loadCases[0];
+
+  return loadCase.nodalLoadList.length + loadCase.elementLoadList.length + loadCase.prescribedBC.length > 0;
 });
 
 const openSolveDiagnostics = () => {
-  if (!hasSolveDiagnosticsIssues.value) return;
-
-  openModal(SolveDiagnosticsDialog, {
-    diagnostics: projectStore.solveDiagnostics,
-    blocked: hasBlockingSolveIssues.value,
-  });
+  openModal(SolveDiagnosticsDialog, { diagnostics: projectStore.solveDiagnostics });
 };
 
 const centerContent = () => {
@@ -401,6 +462,10 @@ const onUpdate = throttle((zooming: boolean) => {
   invalidatePointerMatrix();
   if (zooming) hideTooltip();
   if (grid.value) grid.value.refreshGrid(zooming);
+
+  // The view moved under a resting mouse, so the model point beneath it changed without a report.
+  if (lastPointerType === 'mouse') updatePointerPosition({ clientX: appStore.mouse.x, clientY: appStore.mouse.y });
+  crosshair.value?.refresh();
 }, 1000 / 10);
 
 const toggleGridVisibility = () => {
@@ -427,31 +492,39 @@ const { current, escape, f, c, g, s, _delete } = useMagicKeys({
   },
 });
 
-const { ctrl_a, ctrl_c, ctrl_v } = useMagicKeys({
+const { ctrl_a, ctrl_c, ctrl_v, meta_a, meta_c, meta_v } = useMagicKeys({
   passive: false,
   onEventFired(e) {
     if (isShortcutBlocked()) return;
-    if (e.ctrlKey && e.key === 'a' && e.type === 'keydown') e.preventDefault();
+    if (hasShortcutModifier(e) && e.key === 'a' && e.type === 'keydown') e.preventDefault();
   },
 });
 
+// Cmd on a Mac does what Ctrl does elsewhere.
+const selectAllKeys = computed(() => ctrl_a.value || meta_a.value);
+const copyKeys = computed(() => ctrl_c.value || meta_c.value);
+const pasteKeys = computed(() => ctrl_v.value || meta_v.value);
+
+/** F, C, G and S are shortcuts on their own; held with a modifier they belong to the browser or to save. */
+const withModifier = () => current.has('control') || current.has('meta') || current.has('alt');
+
 watch(f, (v) => {
-  if (isShortcutBlocked()) return;
-  if (v) fitContent();
+  if (!v || isShortcutBlocked() || withModifier()) return;
+  fitContent();
 });
 
 watch(c, (v) => {
-  if (isShortcutBlocked()) return;
-  if (v && !current.has('control')) centerContent();
+  if (!v || isShortcutBlocked() || withModifier()) return;
+  centerContent();
 });
 
 watch(g, (v) => {
-  if (!v || isShortcutBlocked()) return;
+  if (!v || isShortcutBlocked() || withModifier()) return;
   toggleGridVisibility();
 });
 
 watch(s, (v) => {
-  if (!v || isShortcutBlocked()) return;
+  if (!v || isShortcutBlocked() || withModifier()) return;
   toggleSnapToGrid();
 });
 
@@ -463,21 +536,21 @@ watch(_delete, (v) => {
   }
 });
 
-watch(ctrl_a, (v) => {
+watch(selectAllKeys, (v) => {
   if (isShortcutBlocked()) return;
   if (v) {
     projectStore.selectAll2();
   }
 });
 
-watch(ctrl_c, (v) => {
+watch(copyKeys, (v) => {
   if (isShortcutBlocked()) return;
   if (v) {
     useClipboardStore().select(projectStore.selection2);
   }
 });
 
-watch(ctrl_v, (v) => {
+watch(pasteKeys, (v) => {
   if (isShortcutBlocked()) return;
   if (v) {
     paste();
@@ -509,7 +582,7 @@ const placeNode = (label: number | string) => {
     [...addNodeBcs.value]
   );
 
-  applyNodeLcsAngle(node, parseFloat2(addNodeAngle.value));
+  applyNodeLcsAngle(node, appStore.angle(parseFloat2(addNodeAngle.value)));
 
   return node;
 };
@@ -596,7 +669,27 @@ watch(
   }
 );
 
+/**
+ * How far the copy goes from where it was taken, in the length unit on show.
+ *
+ * Pasting by pointing needs the place to be on screen already, and on a touch screen moving the
+ * view to bring it into sight ends the paste. The offset is kept between pastes, so a second bay of
+ * the same frame is a matter of pressing the button again.
+ */
+const pasteOffsetX = ref(0);
+const pasteOffsetZ = ref(0);
+
+const pasteAtOffset = () => {
+  const metres = (value: number) => (Number.isFinite(value) ? appStore.convertInverseLength(value) : 0);
+
+  useClipboardStore().paste({ x: metres(pasteOffsetX.value), z: metres(pasteOffsetZ.value) });
+  appStore.mouseMode = MouseMode.NONE;
+  startNode.value = null;
+};
+
 const paste = () => {
+  if (!useClipboardStore().isAnythingInClipboard()) return;
+
   const midpoint = useClipboardStore().midpoint();
   deltaPaste.value = {
     x: mouseXReal.value - midpoint[0],
@@ -666,7 +759,7 @@ const buildElementLoadDetails = (el: BeamElementLoad): EntityDetails => {
   // A distributed load is an intensity, a concentrated one a force; both parts of the unit count.
   const convertIntensity = isDistributed ? appStore.convertForceDistance : appStore.convertForce;
   let uu = isDistributed ? appStore.units.ForceDistance : appStore.units.Force;
-  if (el instanceof BeamTemperatureLoad) uu = appStore.units.Temperature;
+  if (el instanceof BeamTemperatureLoad) uu = formatMeasureAsHTML(appStore.units.Temperature);
 
   const rows: string[] = [];
 
@@ -687,13 +780,15 @@ const buildElementLoadDetails = (el: BeamElementLoad): EntityDetails => {
 
     if (Math.abs(el.startValues[1]) > 1e-32 || Math.abs(el.endValues[1]) > 1e-32) {
       rows.push(
-        `${ff}<sub>z</sub> = ${convertIntensity(el.startValues[1])} → ${convertIntensity(el.endValues[1])} ${uu}`
+        `${ff}<sub>${appStore.axes.v}</sub> = ${appStore.vertical(convertIntensity(el.startValues[1]))} → ` +
+          `${appStore.vertical(convertIntensity(el.endValues[1]))} ${uu}`
       );
     }
   } else if (el instanceof BeamElementUniformEdgeLoad || el instanceof BeamConcentratedLoad) {
     if (Math.abs(el.values[0]) > 1e-32) rows.push(`${ff}<sub>x</sub> = ${convertIntensity(el.values[0])} ${uu}`);
 
-    if (Math.abs(el.values[1]) > 1e-32) rows.push(`${ff}<sub>z</sub> = ${convertIntensity(el.values[1])} ${uu}`);
+    if (Math.abs(el.values[1]) > 1e-32)
+      rows.push(`${ff}<sub>${appStore.axes.v}</sub> = ${appStore.vertical(convertIntensity(el.values[1]))} ${uu}`);
   }
 
   return { title: t(lt), body: rows.join('<br>') };
@@ -707,11 +802,13 @@ const buildNodalLoadDetails = (el: NodalLoad): EntityDetails => {
   }
 
   if (Math.abs(el.values[2]) > 1e-32) {
-    rows.push(`F<sub>z</sub> = ${appStore.convertForce(el.values[2])} ${appStore.units.Force}`);
+    rows.push(
+      `F<sub>${appStore.axes.v}</sub> = ${appStore.vertical(appStore.convertForce(el.values[2]))} ${appStore.units.Force}`
+    );
   }
 
   if (Math.abs(el.values[4]) > 1e-32) {
-    rows.push(`M<sub>y</sub> = ${appStore.convertMoment(el.values[4])} ${appStore.units.Moment}`);
+    rows.push(`M<sub>${appStore.axes.r}</sub> = ${appStore.convertMoment(el.values[4])} ${appStore.units.Moment}`);
   }
 
   return { title: t('loads.nodalLoad'), body: rows.join('<br>') };
@@ -721,15 +818,18 @@ const buildPrescribedBCDetails = (el: PrescribedDisplacement): EntityDetails => 
   const rows: string[] = [];
 
   if (Math.abs(el.prescribedValues[0]) > 1e-32) {
-    rows.push(`D<sub>x</sub> = ${appStore.convertLength(el.prescribedValues[0])} ${appStore.units.Length}`);
+    rows.push(`D<sub>x</sub> = ${appStore.convertDisplacement(el.prescribedValues[0])} ${appStore.units.Displacement}`);
   }
 
   if (Math.abs(el.prescribedValues[2]) > 1e-32) {
-    rows.push(`D<sub>z</sub> = ${appStore.convertLength(el.prescribedValues[2])} ${appStore.units.Length}`);
+    rows.push(
+      `D<sub>${appStore.axes.v}</sub> = ${appStore.vertical(appStore.convertDisplacement(el.prescribedValues[2]))} ` +
+        appStore.units.Displacement
+    );
   }
 
   if (Math.abs(el.prescribedValues[4]) > 1e-32) {
-    rows.push(`R<sub>y</sub> = ${el.prescribedValues[4]} ${appStore.units.Angle}`);
+    rows.push(`R<sub>${appStore.axes.r}</sub> = ${el.prescribedValues[4]} ${appStore.units.Angle}`);
   }
 
   return { title: t('loads.prescribedDisplacement'), body: rows.join('<br>') };
@@ -745,22 +845,24 @@ const buildNodeDetails = (node: Node): EntityDetails => {
     rows.push(
       `u<sub>x</sub> = ${appStore.formatResultHTML(
         // @ts-expect-error It return value for single Dof
-        node.getUnknowns(projectStore.solver.loadCases[0], [DofID.Dx])
-      )} m`
+        appStore.convertDisplacement(node.getUnknowns(projectStore.solver.loadCases[0], [DofID.Dx]))
+      )} ${appStore.units.Displacement}`
     );
 
     rows.push(
-      `u<sub>z</sub> = ${appStore.formatResultHTML(
-        // @ts-expect-error It return value for single Dof
-        node.getUnknowns(projectStore.solver.loadCases[0], [DofID.Dz])
-      )} m`
+      `u<sub>${appStore.axes.v}</sub> = ${appStore.formatResultHTML(
+        appStore.vertical(
+          // @ts-expect-error It return value for single Dof
+          appStore.convertDisplacement(node.getUnknowns(projectStore.solver.loadCases[0], [DofID.Dz]))
+        )
+      )} ${appStore.units.Displacement}`
     );
 
     rows.push(
-      `φ<sub>y</sub> = ${appStore.formatResultHTML(
+      `φ<sub>${appStore.axes.r}</sub> = ${appStore.formatResultHTML(
         // @ts-expect-error It return value for single Dof
         node.getUnknowns(projectStore.solver.loadCases[0], [DofID.Ry])
-      )} rad`
+      )} ${appStore.units.Angle}`
     );
   }
 
@@ -1322,7 +1424,12 @@ const cancelDimensionPointDrag = () => {
  * between a pointerdown and the pointerup that follows it, and a touch lands on a child element
  * far more often than a mouse does, which put placed nodes anywhere but under the finger.
  */
-const updatePointerPosition = (e: PointerEvent) => {
+const lengthDisplay: LengthDisplay = {
+  toDisplay: (metres) => appStore.convertLength(metres),
+  toMetres: (display) => appStore.convertInverseLength(display),
+};
+
+const updatePointerPosition = (e: Pick<PointerEvent, 'clientX' | 'clientY'>) => {
   appStore.mouse.x = e.clientX;
   appStore.mouse.y = e.clientY;
 
@@ -1338,8 +1445,8 @@ const updatePointerPosition = (e: PointerEvent) => {
   const realStep = viewerStore.gridStep;
   const canSnap = viewerStore.snapToGrid && Number.isFinite(realStep) && realStep > 0;
 
-  const snappedX = Math.round(mXReal / realStep) * realStep;
-  const snappedY = Math.round(mYReal / realStep) * realStep;
+  const snappedX = snapToGrid(mXReal, realStep, lengthDisplay);
+  const snappedY = snapToGrid(mYReal, realStep, lengthDisplay);
 
   mouseXReal.value = canSnap ? snappedX : mXReal;
   mouseYReal.value = canSnap ? snappedY : mYReal;
@@ -1378,7 +1485,15 @@ const mouseMove = (e: PointerEvent) => {
     const index = intersected.value.index;
     if (index === null) return;
 
-    const item = useProjectStore().solver.domain.nodes.get(String(index))!;
+    // The hovered node can vanish under the pointer (undo, delete, a newly opened model) while the
+    // hover state still names it, so the drag has nothing to move.
+    const item = useProjectStore().solver.domain.nodes.get(String(index));
+    if (!item) {
+      appStore.mouseMode = MouseMode.NONE;
+      intersected.value.type = null;
+      intersected.value.index = null;
+      return;
+    }
 
     if (drgNode === null) {
       drgNode = item;
@@ -1386,9 +1501,8 @@ const mouseMove = (e: PointerEvent) => {
       origZ = item.coords[2];
     }
 
-    useProjectStore().solver.domain.nodes.get(String(index))!.coords[0] = mouseXReal.value;
-
-    useProjectStore().solver.domain.nodes.get(String(index))!.coords[2] = mouseYReal.value;
+    item.coords[0] = mouseXReal.value;
+    item.coords[2] = mouseYReal.value;
 
     finalX = mouseXReal.value;
     finalZ = mouseYReal.value;
@@ -2205,13 +2319,14 @@ defineExpose({ centerContent, fitContent });
     <!-- <div style="position: absolute; top: 0; left: 0; background: red; z-index: 101">{{ intersected }}</div> -->
     <div
       v-if="!appStore.inViewerMode"
+      id="gridAndUnits"
       class="text-body-2 d-flex ga-1 line-height-1"
       style="position: absolute; z-index: 100; bottom: 16px; right: 16px"
     >
       <div class="d-flex align-center ga-1">
         <v-chip density="compact" class="d-flex pa-0 overflow-hidden">
           <!-- Grid toggle -->
-          <v-tooltip text="Toggle grid (G)" location="top" :open-on-click="!deviceHasHover">
+          <v-tooltip :text="$t('viewer.toggleGrid')" location="top" :open-on-click="!deviceHasHover">
             <template #activator="{ props: tooltipProps }">
               <v-btn
                 v-bind="tooltipProps"
@@ -2227,7 +2342,7 @@ defineExpose({ centerContent, fitContent });
             </template>
           </v-tooltip>
           <!-- Snap to grid -->
-          <v-tooltip text="Toggle snap to grid (S)" location="top" :open-on-click="!deviceHasHover">
+          <v-tooltip :text="$t('viewer.toggleSnap')" location="top" :open-on-click="!deviceHasHover">
             <template #activator="{ props: tooltipProps }">
               <v-btn
                 v-bind="tooltipProps"
@@ -2244,8 +2359,43 @@ defineExpose({ centerContent, fitContent });
           </v-tooltip>
         </v-chip>
       </div>
+      <!--
+        The crosshair follows a mouse and is drawn for nothing else, so the switch for it is
+        offered only where there is one. Its own icon rather than a letter: G and S name the keys
+        that do the same thing, and this has no key of its own - c centres the view.
+      -->
+      <v-tooltip
+        v-if="deviceHasHover"
+        :text="$t('viewer.toggleCrosshair')"
+        location="top"
+        :open-on-click="!deviceHasHover"
+      >
+        <template #activator="{ props: tooltipProps }">
+          <v-chip
+            v-bind="tooltipProps"
+            density="compact"
+            class="pa-0 justify-center align-self-center"
+            :class="viewerStore.showCrosshair ? 'text-black' : 'text-grey'"
+            style="min-width: 28px"
+            @click="viewerStore.showCrosshair = !viewerStore.showCrosshair"
+          >
+            <!-- what it draws: two dashed lines crossing, with the point they cross at marked -->
+            <svg class="crosshair-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+              <path
+                d="M0.5 8H5.5M10.5 8H15.5M8 0.5V5.5M8 10.5V15.5"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1"
+                stroke-dasharray="2 1"
+              />
+              <circle cx="8" cy="8" r="1.5" fill="currentColor" />
+            </svg>
+          </v-chip>
+        </template>
+      </v-tooltip>
+
       <v-chip-group>
-        <v-chip class="justify-end" density="compact" @click="appStore.openSettings()">
+        <v-chip class="justify-end" density="compact" @click="appStore.openSettings('lang')">
           <div class="d-flex ga-1">
             <span v-html="formatMeasureAsHTML(appStore.units.Length)"></span>
             <span v-html="formatMeasureAsHTML(appStore.units.Area)"></span>
@@ -2269,7 +2419,7 @@ defineExpose({ centerContent, fitContent });
         density="comfortable"
         class="mr-1"
         rounded="lg"
-        title="Undo"
+        :title="$t('common.undo')"
         @click="undoModelChange()"
       ></v-btn>
       <v-btn
@@ -2278,7 +2428,7 @@ defineExpose({ centerContent, fitContent });
         density="comfortable"
         class="mr-1"
         rounded="lg"
-        title="Redo"
+        :title="$t('common.redo')"
         @click="redoModelChange()"
       ></v-btn>
     </div>
@@ -2296,7 +2446,7 @@ defineExpose({ centerContent, fitContent });
         density="comfortable"
         class="mr-1"
         rounded="lg"
-        title="Box select"
+        :title="$t('viewer.boxSelect')"
         :color="touchSelectArmed ? 'primary' : 'default'"
         @click="touchSelectArmed = !touchSelectArmed"
       ></v-btn>
@@ -2306,25 +2456,27 @@ defineExpose({ centerContent, fitContent });
         density="comfortable"
         class="mr-1"
         rounded="lg"
-        title="Center content"
+        :title="$t('viewer.centerContent')"
         @click="centerContent"
       ></v-btn>
       <v-btn
+        id="fitContentButton"
         icon="mdi:mdi-fit-to-screen-outline"
         size="32"
         density="comfortable"
         class="mr-1"
         rounded="lg"
-        title="Fit content to screen"
+        :title="$t('viewer.fitContent')"
         @click="fitContent"
       >
       </v-btn>
       <v-btn
+        id="viewerSettingsToggle"
         icon="mdi:mdi-cog"
         size="32"
         density="comfortable"
         rounded="lg"
-        title="Settings"
+        :title="$t('common.settings')"
         :color="viewerStore.settingsOpen ? 'primary' : 'default'"
         @click="viewerStore.settingsOpen = !viewerStore.settingsOpen"
       ></v-btn>
@@ -2355,8 +2507,20 @@ defineExpose({ centerContent, fitContent });
       <!-- What the next placement gets; the mode stays open, so the options live with it -->
       <div v-if="appStore.mouseMode === MouseMode.ADD_NODE" class="d-flex align-center ga-3">
         <v-checkbox-btn v-model="addNodeBcs" :value="DofID.Dx" density="compact" label="Dx" class="flex-grow-0" />
-        <v-checkbox-btn v-model="addNodeBcs" :value="DofID.Dz" density="compact" label="Dz" class="flex-grow-0" />
-        <v-checkbox-btn v-model="addNodeBcs" :value="DofID.Ry" density="compact" label="Ry" class="flex-grow-0" />
+        <v-checkbox-btn
+          v-model="addNodeBcs"
+          :value="DofID.Dz"
+          density="compact"
+          :label="`D${appStore.axes.v}`"
+          class="flex-grow-0"
+        />
+        <v-checkbox-btn
+          v-model="addNodeBcs"
+          :value="DofID.Ry"
+          density="compact"
+          :label="`R${appStore.axes.r}`"
+          class="flex-grow-0"
+        />
         <v-text-field
           v-model="addNodeAngle"
           :title="$t('nodes.lcsAngle')"
@@ -2369,6 +2533,40 @@ defineExpose({ centerContent, fitContent });
           class="flex-grow-0 add-node-angle"
           @keydown="checkNumber($event)"
         />
+      </div>
+
+      <!--
+        Point at the place, or say how far from where it was copied. The second is the only way when
+        the place is off screen, since moving the view to find it ends the paste.
+      -->
+      <div v-if="appStore.mouseMode === MouseMode.PASTE_CLIPBOARD" class="d-flex align-center ga-2">
+        <v-text-field
+          v-model.number="pasteOffsetX"
+          type="number"
+          density="compact"
+          variant="plain"
+          hide-details
+          prefix="&Delta;x"
+          :suffix="appStore.units.Length"
+          style="width: 108px"
+          class="flex-grow-0"
+          @keydown.enter="pasteAtOffset"
+        />
+        <v-text-field
+          v-model.number="pasteOffsetZ"
+          type="number"
+          density="compact"
+          variant="plain"
+          hide-details
+          prefix="&Delta;z"
+          :suffix="appStore.units.Length"
+          style="width: 108px"
+          class="flex-grow-0"
+          @keydown.enter="pasteAtOffset"
+        />
+        <v-btn size="small" variant="tonal" density="comfortable" @click="pasteAtOffset">
+          {{ $t('common.paste') }}
+        </v-btn>
       </div>
 
       <div v-if="appStore.mouseMode === MouseMode.ADD_ELEMENT" class="d-flex align-center ga-3">
@@ -2390,6 +2588,7 @@ defineExpose({ centerContent, fitContent });
     <context-menu v-model:show="showCtxMenu" :options="optionsCtxMenu">
       <context-menu-item
         @click.ctrl="appStore.mouseMode = MouseMode.ADD_NODE"
+        @click.meta="appStore.mouseMode = MouseMode.ADD_NODE"
         @click.exact="openModal(AddNodeDialog, {})"
       >
         <template #icon>
@@ -2397,11 +2596,12 @@ defineExpose({ centerContent, fitContent });
         </template>
         <template #label>
           <span class="label">{{ $t('nodes.addNode') }}</span>
-          <span class="ml-auto text-right" style="font-size: 10px">Hold Ctrl to add using mouse</span>
+          <span class="ml-auto text-right" style="font-size: 10px">{{ $t('viewer.holdCtrl') }}</span>
         </template>
       </context-menu-item>
       <context-menu-item
         @click.ctrl="appStore.mouseMode = MouseMode.ADD_ELEMENT"
+        @click.meta="appStore.mouseMode = MouseMode.ADD_ELEMENT"
         @click.exact="openModal(AddElementDialog, {})"
       >
         <template #icon>
@@ -2409,7 +2609,7 @@ defineExpose({ centerContent, fitContent });
         </template>
         <template #label>
           <span class="label">{{ $t('elements.addElement') }}</span>
-          <span class="ml-auto text-right" style="font-size: 10px">Hold Ctrl to add using mouse</span>
+          <span class="ml-auto text-right" style="font-size: 10px">{{ $t('viewer.holdCtrl') }}</span>
         </template>
       </context-menu-item>
       <context-menu-item @click="appStore.mouseMode = MouseMode.ADD_DIMLINE">
@@ -2480,16 +2680,81 @@ defineExpose({ centerContent, fitContent });
 
     <div class="text-body-2 warning ga-1 d-flex flex-column pr-6">
       <div style="width: fit-content">
+        <v-chip
+          v-if="solveBanner?.type === 'incomplete'"
+          color="info"
+          variant="flat"
+          size="small"
+          :prepend-icon="solveBanner.icon"
+          :title="solveBanner.text"
+          @click="openSolveDiagnostics"
+          @mouseenter="holdFreeMotion = true"
+          @mouseleave="holdFreeMotion = false"
+        >
+          {{ $t('solveDiagnostics.incompleteChip') }}
+        </v-chip>
+        <v-chip
+          v-else-if="solveBanner && errorsCollapsed"
+          color="error"
+          variant="flat"
+          size="small"
+          :prepend-icon="solveBanner.icon"
+          :title="solveBanner.text"
+          @click="collapsedErrorsKey = null"
+          @mouseenter="holdFreeMotion = true"
+          @mouseleave="holdFreeMotion = false"
+        >
+          {{ $t('solveDiagnostics.blockedTitle') }}
+        </v-chip>
         <v-alert
-          v-if="hasSolveDiagnosticsIssues"
-          icon="$warning"
+          v-else-if="solveBanner"
+          :model-value="true"
+          :icon="solveBanner.icon"
           density="compact"
-          :type="hasBlockingSolveIssues ? 'error' : 'warning'"
+          :type="solveBanner.type"
+          closable
+          :close-label="$t('solveDiagnostics.collapseErrors')"
+          @click:close="collapsedErrorsKey = errorsKey"
+          @mouseenter="holdFreeMotion = true"
+          @mouseleave="holdFreeMotion = false"
         >
           <template #text>
-            <div class="d-flex align-center">
-              {{ solveDiagnosticsSummary }}
-              <v-btn variant="text" density="compact" size="small" @click="openSolveDiagnostics">Show details</v-btn>
+            <div class="d-flex align-center flex-wrap">
+              {{ solveBanner.text }}
+              <v-btn variant="text" density="compact" size="small" @click="openSolveDiagnostics">{{
+                $t('solveDiagnostics.showDetails')
+              }}</v-btn>
+              <v-btn
+                v-if="hasFreeMotion"
+                variant="text"
+                density="compact"
+                size="small"
+                :icon="viewerStore.showMechanisms ? 'mdi-eye-off-outline' : 'mdi-eye-outline'"
+                :title="motionToggleLabel"
+                :aria-label="motionToggleLabel"
+                @click="viewerStore.showMechanisms = !viewerStore.showMechanisms"
+              />
+            </div>
+          </template>
+        </v-alert>
+      </div>
+      <div style="width: fit-content">
+        <v-alert
+          v-if="warningBanner"
+          :model-value="true"
+          icon="$warning"
+          density="compact"
+          type="warning"
+          closable
+          :close-label="$t('solveDiagnostics.dismissWarnings')"
+          @click:close="projectStore.dismissWarnings()"
+        >
+          <template #text>
+            <div class="d-flex align-center flex-wrap">
+              {{ warningBanner }}
+              <v-btn variant="text" density="compact" size="small" @click="openSolveDiagnostics">{{
+                $t('solveDiagnostics.showDetails')
+              }}</v-btn>
             </div>
           </template>
         </v-alert>
@@ -2497,7 +2762,7 @@ defineExpose({ centerContent, fitContent });
       <div style="width: fit-content">
         <v-alert v-if="projectStore.materials.length === 0" icon="$warning" density="compact" type="error">
           <template #text>
-            <div class="d-flex align-center">
+            <div class="d-flex align-center flex-wrap">
               {{ $t('warnings.noMaterialsDefined') }}
               <v-btn variant="text" density="compact" size="small" @click="openModal(AddMaterialDialog)">{{
                 $t('common.addNew')
@@ -2509,7 +2774,7 @@ defineExpose({ centerContent, fitContent });
       <div style="width: fit-content">
         <v-alert v-if="projectStore.crossSections.length === 0" icon="$warning" density="compact" type="error">
           <template #text>
-            <div class="d-flex align-center">
+            <div class="d-flex align-center flex-wrap">
               {{ $t('warnings.noCrossSectionsDefined') }}
               <v-btn variant="text" density="compact" size="small" @click="openModal(AddCrossSectionDialog)">
                 {{ $t('common.addNew') }}
@@ -2530,9 +2795,16 @@ defineExpose({ centerContent, fitContent });
       />
     </svg>
 
+    <Crosshair
+      v-if="!appStore.inViewerMode"
+      ref="crosshair"
+      :target="svg"
+      :viewport="viewport"
+      :rulers="viewerStore.showGrid"
+    />
+
     <SvgPanZoom
       ref="panZoom"
-      :on-update="onUpdate"
       :padding="16"
       :mobile-padding="12"
       :touch="appStore.mouseMode !== MouseMode.MOVING && appStore.mouseMode !== MouseMode.SELECTING"
@@ -2540,8 +2812,10 @@ defineExpose({ centerContent, fitContent });
       :model-bounds="modelBounds"
       fit-ignore="[data-fit-ignore]"
       :fit-reserve="fitReserve"
+      :fit-min-aspect="0.5"
       center-after-fit
       style="overflow: visible; z-index: 50; min-height: 0"
+      @update="onUpdate"
     >
       <svg
         ref="svg"
@@ -2624,7 +2898,7 @@ defineExpose({ centerContent, fitContent });
                   :data-element-load-id="index"
                   :eload="eload"
                   :scale="scale"
-                  :convert-force="appStore.convertForce"
+                  :convert-temperature="appStore.convertTemperature"
                   :font-size="viewerStore.fontSize"
                   :number-format="appStore.numberFormatter"
                   @mousemove="onElementLoadHover($event, eload)"
@@ -2749,7 +3023,7 @@ defineExpose({ centerContent, fitContent });
               :class="{ selected: projectStore.selection2.prescribedBC.includes(index) }"
               :nload="nload"
               :scale="scale"
-              :convert-length="appStore.convertLength"
+              :convert-displacement="appStore.convertDisplacement"
               :multiplier="projectStore.defoScale * viewerStore.resultsScalePx_"
               :font-size="viewerStore.fontSize"
               :number-format="appStore.numberFormatter"
@@ -2786,6 +3060,7 @@ defineExpose({ centerContent, fitContent });
               @nodepointerup="onNodeClick"
             />
           </g>
+          <SVGSolveIssues v-if="!isZooming" :scale="scale" :show-incomplete="modelHasLoads" :hold="holdFreeMotion" />
           <g>
             <SVGDimensioning
               v-for="dim in normalizedDimensions"
@@ -2795,6 +3070,7 @@ defineExpose({ centerContent, fitContent });
               :scale="scale"
               :font-size="viewerStore.fontSize"
               :number-format="appStore.numberFormatter"
+              :convert-length="appStore.convertLength"
               :selected="projectStore.selection2.dimensions.includes(getDimensionId(dim))"
               :show-points="projectStore.selection2.dimensions.includes(getDimensionId(dim))"
               @dimensionpointerdown="onDimensionPointerDown($event, getDimensionId(dim))"
@@ -2810,6 +3086,7 @@ defineExpose({ centerContent, fitContent });
               :scale="scale"
               :font-size="viewerStore.fontSize"
               :number-format="appStore.numberFormatter"
+              :convert-length="appStore.convertLength"
               :show-points="true"
               :interactive="false"
             />
@@ -2820,7 +3097,7 @@ defineExpose({ centerContent, fitContent });
           <g v-if="appStore.mouseMode === MouseMode.PASTE_CLIPBOARD" ref="pasteLayer">
             <g>
               <SVGElement
-                v-for="(element, index) in useClipboardStore().selection.elements"
+                v-for="(element, index) in useClipboardStore().elements"
                 :key="`element-${index}`"
                 :element="projectStore.solver.domain.elements.get(element) as Beam2D"
                 :scale="scale"
@@ -2843,7 +3120,7 @@ defineExpose({ centerContent, fitContent });
             </g>
             <g class="nodes">
               <SVGNode
-                v-for="(node, index) in useClipboardStore().selection.nodes"
+                v-for="(node, index) in useClipboardStore().nodes"
                 :key="`node-${index}`"
                 :node="projectStore.solver.domain.nodes.get(node) as Node"
                 :scale="scale"
@@ -2867,6 +3144,11 @@ defineExpose({ centerContent, fitContent });
     </SvgPanZoom>
 
     <SelectionBox />
+
+    <FirstBeamTask
+      v-if="appStore.firstBeamActive && !appStore.inViewerMode"
+      @drawn="if (appStore.mouseMode === MouseMode.ADD_ELEMENT) cancelActiveMode();"
+    />
 
     <div
       v-if="projectStore.selection.type !== null"
@@ -2908,7 +3190,7 @@ defineExpose({ centerContent, fitContent });
       </div>
     </div>
 
-    <div v-if="viewerStore.settingsOpen" class="" style="position: absolute; right: 24px; top: 64px; z-index: 600">
+    <div v-if="viewerStore.settingsOpen" class="display-options">
       <div id="viewerSettings" class="d-flex flex-sm-column pa-1 overflow-y-auto ga-2 align-end justify-end">
         <div
           color="grey-lighten-5"
@@ -2935,23 +3217,29 @@ defineExpose({ centerContent, fitContent });
           </v-checkbox>
           <v-checkbox
             v-model="useViewerStore().showShearForce"
-            label="Vz (x)"
+            :label="`V${appStore.axes.v} (x)`"
             hide-details
             density="compact"
             class="inline-checkbox mr-2 flex-shrink-0 text-no-wrap"
             :disabled="useProjectStore().model === 'EigenValueDynamicSolver'"
           >
-            <template #label>V<sub>z</sub>&nbsp;(x)</template>
+            <template #label
+              >V<sub>{{ appStore.axes.v }}</sub
+              >&nbsp;(x)</template
+            >
           </v-checkbox>
           <v-checkbox
             v-model="useViewerStore().showBendingMoment"
-            label="My (x)"
+            :label="`M${appStore.axes.r} (x)`"
             hide-details
             density="compact"
             class="inline-checkbox mr-2 flex-shrink-0 text-no-wrap"
             :disabled="useProjectStore().model === 'EigenValueDynamicSolver'"
           >
-            <template #label>M<sub>y</sub>&nbsp;(x)</template>
+            <template #label
+              >M<sub>{{ appStore.axes.r }}</sub
+              >&nbsp;(x)</template
+            >
           </v-checkbox>
           <v-checkbox
             v-model="useViewerStore().showReactions"
@@ -2996,9 +3284,9 @@ defineExpose({ centerContent, fitContent });
           />
         </div>
       </div>
-      <div class="text-right text-sm-body-2 d-flex align-center justify-end">
+      <div class="text-right text-sm-body-2 d-flex align-center justify-end display-options-links">
         <HelpTip topic="diagrams" location="bottom end" />
-        <button class="text-decoration-underline bg-white" @click="appStore.openSettings()">
+        <button class="text-decoration-underline bg-white" @click="appStore.openSettings('appearance')">
           {{ $t('sideSettings.more_settings') }}
         </button>
       </div>
@@ -3007,6 +3295,24 @@ defineExpose({ centerContent, fitContent });
 </template>
 
 <style lang="scss" scoped>
+/*
+ * The display options float over the top of the viewer, where the model's messages sit too.
+ * Only the panels themselves take the pointer; the gaps around them, which on a phone fall
+ * right across the messages, let taps through to what is underneath.
+ */
+.display-options {
+  position: absolute;
+  right: 24px;
+  top: 64px;
+  z-index: 600;
+  pointer-events: none;
+}
+
+.display-options #viewerSettings > *,
+.display-options-links > * {
+  pointer-events: auto;
+}
+
 /*
  * The plain variant reserves 8px above the text for a floating label this field does not use,
  * which drops the angle below the Dx/Dz/Ry labels sitting next to it in the banner.
