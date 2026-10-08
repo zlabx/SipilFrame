@@ -34,6 +34,7 @@ import Examples from '@/components/dialogs/Examples.vue';
 import ExportImage from '@/components/dialogs/ExportImage.vue';
 import Changelog from '@/components/dialogs/Changelog.vue';
 import Editor from '@/views/Editor.vue';
+import HeaderMenu from '@/components/HeaderMenu.vue';
 import Dialogs from '@/components/Dialogs.vue';
 import { useProjectStore } from './store/project';
 import { useAppStore } from './store/app';
@@ -269,6 +270,19 @@ const openExportImage = () => {
   openModal(ExportImage);
 };
 
+// SipilFrame: same confirmation as the "Clear mesh" item in the side menu, for the header menu row.
+const confirmClearMesh = () => {
+  openModal(Confirmation, {
+    title: t('confirmation.clearMesh.title'),
+    message: t('confirmation.clearMesh.message'),
+    success: (params) => clearMesh(params.checkboxes[0].value, params.checkboxes[1].value),
+    checkboxes: [
+      { label: t('confirmation.clearMesh.materials'), value: false },
+      { label: t('confirmation.clearMesh.crossSections'), value: false },
+    ],
+  });
+};
+
 const openChangelog = () => {
   openModal(Changelog);
 };
@@ -420,32 +434,19 @@ const showBuildInfo = false;
       </template>
     </VOnboardingWrapper>
 
-    <v-app-bar v-if="!appStore.inViewerMode" clipped-lefs clipped-right app color="primary" density="compact">
+    <v-app-bar
+      v-if="!appStore.inViewerMode"
+      clipped-lefs
+      clipped-right
+      app
+      color="primary"
+      density="compact"
+      extended
+      extension-height="48"
+    >
       <v-app-bar-nav-icon @click="appStore.drawerOpen = !appStore.drawerOpen"></v-app-bar-nav-icon>
 
       <div class="app-title ml-3 d-flex align-center" style="user-select: none">SipilFrame</div>
-
-      <v-btn
-        class="d-none d-sm-inline-flex ml-3"
-        @click="
-          openModal(Confirmation, {
-            title: t('confirmation.clearMesh.title'),
-            message: t('confirmation.clearMesh.message'),
-            success: (params) => clearMesh(params.checkboxes[0].value, params.checkboxes[1].value),
-            checkboxes: [
-              { label: t('confirmation.clearMesh.materials'), value: false },
-              { label: t('confirmation.clearMesh.crossSections'), value: false },
-            ],
-          })
-        "
-      >
-        <v-icon>mdi-delete-empty</v-icon>
-        <span>{{ $t('common.clearMesh') }}</span>
-      </v-btn>
-
-      <v-btn class="d-none d-sm-inline-flex" @click="shareMesh">
-        <v-icon>mdi-share</v-icon> {{ $t('common.shareModel') }}
-      </v-btn>
 
       <v-spacer></v-spacer>
 
@@ -468,6 +469,17 @@ const showBuildInfo = false;
       >
         <v-icon>mdi-github</v-icon>
       </v-btn>
+
+      <template #extension>
+        <HeaderMenu
+          @open="$refs.file.click()"
+          @save="saveProject"
+          @export-image="openExportImage"
+          @share="shareMesh"
+          @examples="openExamples"
+          @clear="confirmClearMesh"
+        />
+      </template>
     </v-app-bar>
 
     <v-navigation-drawer v-model="appStore.drawerOpen" temporary>

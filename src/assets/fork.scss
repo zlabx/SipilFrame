@@ -77,3 +77,11 @@ $divider: #cdd0d4;
 .dock-right #bottomBar > .v-window {
   border-top: 0;
 }
+
+/*
+ * The app bar has a second row (extension), so it is taller than the 48px hard-coded in main.scss.
+ * Same rule, but with the real layout offset (set by Vuetify as --v-layout-top on .v-main).
+ */
+.v-application .v-main {
+  height: calc(var(--dvh, 1dvh) * 100 - var(--v-layout-top, 48px)) !important;
+}
