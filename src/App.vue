@@ -310,7 +310,10 @@ const openExportImage = () => {
   openModal(ExportImage);
 };
 
-// SipilFrame: same confirmation as the "Clear mesh" item in the side menu, for the header menu row.
+// SipilFrame: the header menu row (components/HeaderMenu.vue) reuses these handlers.
+const openProjectFile = () => (file.value as HTMLInputElement | null)?.click();
+
+// Same confirmation as the "Clear mesh" item in the side menu.
 const confirmClearMesh = () => {
   openModal(Confirmation, {
     title: t('confirmation.clearMesh.title'),
@@ -516,7 +519,7 @@ const showBuildInfo = false;
 
       <template #extension>
         <HeaderMenu
-          @open="$refs.file.click()"
+          @open="openProjectFile"
           @save="saveProject"
           @export-image="openExportImage"
           @share="shareMesh"
