@@ -1,4 +1,3 @@
-import { readFileSync } from 'node:fs';
 import type { Plugin } from 'vite';
 
 /**
@@ -6,45 +5,34 @@ import type { Plugin } from 'vite';
  * at build time, so the upstream locale files stay exactly as upstream ships them (no merge
  * conflicts on them, and new upstream locales are branded automatically).
  *
- * Why not at runtime: production messages are precompiled to ASTs, not strings.
+ * It works on the *compiled* messages: the virtual module `@intlify/unplugin-vue-i18n/messages`. That
+ * plugin reads the locale files straight from disk, so a `load` hook never sees them, and in
+ * production the messages are ASTs, not strings, so a runtime replacement would be fragile.
  */
 export const BRAND_NAME = 'SipilFrame';
 
 /**
- * Message keys (same path in every locale) whose text names the app. A test fails if "edubeam"
- * shows up anywhere else, so a new mention is a decision (brand it, or keep it as attribution).
+ * Message keys (same path in every locale) that say "edubeam" today. Only used by the test that
+ * guards this: if "edubeam" shows up anywhere else, that is a decision (brand it, or keep it as
+ * attribution), not something to replace silently.
  */
 export const BRANDED_KEYS = ['welcome.title', 'tour.bottomBar.description'];
 
 // "edubeam" plus inflected endings (Czech "edubeamu"); the CSS class `class="edubeam"` must stay.
-const BRAND_PATTERN = /(?<!class=")edubeam\w*/gi;
+const BRAND_PATTERN = /(?<!class=\\?")edubeam\w*/gi;
 
-export function brandLocaleJson(text: string): string {
-  const data = JSON.parse(text);
-
-  for (const key of BRANDED_KEYS) {
-    const path = key.split('.');
-    const last = path.pop() as string;
-
-    let node = data;
-    for (const part of path) node = node?.[part];
-
-    if (node && typeof node[last] === 'string') node[last] = node[last].replace(BRAND_PATTERN, BRAND_NAME);
-  }
-
-  return JSON.stringify(data);
+export function brandCompiledMessages(code: string): string {
+  return code.replace(BRAND_PATTERN, BRAND_NAME);
 }
 
-/** Vite plugin: serves the branded version of src/locales/<locale>.json to the i18n plugin. */
+/** Vite plugin: brands the compiled messages module of the i18n plugin. */
 export default function brandLocales(): Plugin {
   return {
     name: 'sipilframe:brand-locales',
-    enforce: 'pre',
-    load(id) {
-      const file = id.split('?')[0];
-      if (!/[\\/]src[\\/]locales[\\/][^\\/]+\.json$/.test(file)) return null;
+    transform(code, id) {
+      if (!id.includes('unplugin-vue-i18n/messages') || !/edubeam/i.test(code)) return null;
 
-      return brandLocaleJson(readFileSync(file, 'utf8'));
+      return { code: brandCompiledMessages(code), map: null };
     },
   };
 }
