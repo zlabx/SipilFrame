@@ -85,3 +85,12 @@ $divider: #cdd0d4;
 .v-application .v-main {
   height: calc(var(--dvh, 1dvh) * 100 - var(--v-layout-top, 48px)) !important;
 }
+
+/*
+ * Onboarding tour: upstream puts the step card (1001) under the app bar (1008), which was fine
+ * with a one-row header. The header is two rows tall now, so a card placed beside a control near
+ * the top (e.g. undo/redo) would have its title hidden. The dimming overlay stays below the bar.
+ */
+html:root {
+  --v-onboarding-step-z: 1010;
+}

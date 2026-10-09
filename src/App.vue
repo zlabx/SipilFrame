@@ -99,9 +99,25 @@ const allSteps = computed(() => [
 // SipilFrame: docked right, the bottom panel has no "?" button (its header row is hidden), so the
 // tour skips the step that points at it. `steps` keeps its upstream name for the template.
 const dock = useDockStore();
-const steps = computed(() =>
-  dock.isRight ? allSteps.value.filter((step) => step.attachTo.element !== '#bottomBarHelp') : allSteps.value
-);
+
+// The header is two rows tall, so the first step's card (placed under the menu button) would sit
+// behind the second row. Offset it by however far the header really reaches below that button.
+const belowHeader = ({ reference }: { reference: { y: number; height: number } }): [number, number] => {
+  const headerBottom = document.querySelector('.v-app-bar')?.getBoundingClientRect().bottom ?? 0;
+  return [0, Math.max(0, headerBottom - (reference.y + reference.height)) + 10];
+};
+
+const steps = computed(() => {
+  const list = dock.isRight
+    ? allSteps.value.filter((step) => step.attachTo.element !== '#bottomBarHelp')
+    : allSteps.value;
+
+  return list.map((step) =>
+    step.attachTo.element === '#appMenu'
+      ? { ...step, options: { popper: { modifiers: [{ name: 'offset', options: { offset: belowHeader } }] } } }
+      : step
+  );
+});
 
 /**
  * Also offered in the menu, for anyone who skipped it. The display options are one of its stops.
