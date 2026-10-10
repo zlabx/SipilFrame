@@ -9,7 +9,7 @@ export type DockSide = 'bottom' | 'right';
 export const DOCK_MIN_VIEWPORT_WIDTH = 768;
 
 export const MIN_DOCK_WIDTH = 320;
-export const DEFAULT_DOCK_WIDTH = 600;
+export const DEFAULT_DOCK_WIDTH = 520;
 
 /**
  * Where the bottom bar (nodes / elements / loads / ... panel) is docked, decided by screen size:
